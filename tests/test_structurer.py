@@ -1,8 +1,5 @@
 """
-Tests for the Structurer module.
-
-This module contains unit tests for AI-powered content structuring.
-External AI API calls are mocked to keep tests fast and offline.
+Tests for DocumentStructurer — all API calls are mocked, no real network traffic.
 """
 
 import json
@@ -10,159 +7,237 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
-from docstream.core.structurer import GeminiStructurer, GroqStructurer, Structurer
+from docstream.core.structurer import _MAX_CONTENT_CHARS, DocumentStructurer
 from docstream.exceptions import StructuringError
-from docstream.models.document import (
-    DocumentAST,
-)
+from docstream.models.document import Block, BlockType, DocumentAST, TextBlock
 
-MOCK_AI_RESPONSE = json.dumps(
+# ---------------------------------------------------------------------------
+# Helpers
+# ---------------------------------------------------------------------------
+
+_VALID_RESPONSE = json.dumps(
     {
+        "title": "Test Document",
+        "authors": ["Alice"],
+        "abstract": "An abstract.",
         "sections": [
             {
-                "title": "Introduction",
+                "heading": "Introduction",
                 "level": 1,
-                "blocks": [{"type": "text", "content": "This is the introduction."}],
+                "content": ["First paragraph.", "Second paragraph."],
+                "tables": [],
+                "images": [],
+                "subsections": [],
             }
-        ]
+        ],
+        "metadata": {},
     }
 )
 
+_FENCED_RESPONSE = f"```json\n{_VALID_RESPONSE}\n```"
 
-class TestGeminiStructurer:
-    """Unit tests for GeminiStructurer."""
 
-    @patch("docstream.core.structurer.genai")
-    def test_structure_returns_document_ast(self, mock_genai, sample_raw_content):
-        """GeminiStructurer.structure should return a DocumentAST."""
-        mock_model = MagicMock()
-        mock_model.generate_content.return_value.text = MOCK_AI_RESPONSE
-        mock_genai.GenerativeModel.return_value = mock_model
+def _make_blocks(n: int = 2) -> list[Block]:
+    return [TextBlock(type=BlockType.TEXT, content=f"Paragraph {i}.") for i in range(n)]
 
-        structurer = GeminiStructurer(api_key="fake_key")
-        result = structurer.structure(sample_raw_content)
+
+def _structurer(gemini_key: str = "fake-gemini", groq_key: str = "fake-groq") -> DocumentStructurer:
+    """Return a DocumentStructurer whose clients are replaced with MagicMocks."""
+    with patch("docstream.core.structurer.genai"):
+        with patch("docstream.core.structurer.Groq"):
+            ds = DocumentStructurer(gemini_key=gemini_key, groq_key=groq_key)
+    ds._gemini_client = MagicMock()
+    ds._groq_client = MagicMock()
+    return ds
+
+
+# ---------------------------------------------------------------------------
+# Tests
+# ---------------------------------------------------------------------------
+
+
+class TestStructureReturnsValidAst:
+    def test_structure_returns_valid_ast(self):
+        """Gemini returns valid JSON → DocumentAST with correct fields."""
+        ds = _structurer()
+        ds._gemini_client.generate_content.return_value = MagicMock(text=_VALID_RESPONSE)
+
+        result = ds.structure(_make_blocks())
+
+        assert isinstance(result, DocumentAST)
+        assert result.title == "Test Document"
+        assert result.authors == ["Alice"]
+        assert result.abstract == "An abstract."
+        assert len(result.sections) == 1
+        assert result.sections[0].heading == "Introduction"
+        assert result.sections[0].content == ["First paragraph.", "Second paragraph."]
+
+    def test_markdown_fences_are_stripped(self):
+        """Markdown-fenced JSON response is parsed correctly."""
+        ds = _structurer()
+        ds._gemini_client.generate_content.return_value = MagicMock(text=_FENCED_RESPONSE)
+
+        result = ds.structure(_make_blocks())
+
+        assert isinstance(result, DocumentAST)
+        assert result.title == "Test Document"
+
+    def test_nested_subsections_are_parsed(self):
+        """Subsections are recursively converted to Section objects."""
+        response = json.dumps(
+            {
+                "title": "Doc",
+                "authors": [],
+                "abstract": None,
+                "sections": [
+                    {
+                        "heading": "Top",
+                        "level": 1,
+                        "content": [],
+                        "tables": [],
+                        "images": [],
+                        "subsections": [
+                            {
+                                "heading": "Sub",
+                                "level": 2,
+                                "content": ["text"],
+                                "tables": [],
+                                "images": [],
+                                "subsections": [],
+                            }
+                        ],
+                    }
+                ],
+                "metadata": {},
+            }
+        )
+        ds = _structurer()
+        ds._gemini_client.generate_content.return_value = MagicMock(text=response)
+
+        result = ds.structure(_make_blocks())
+
+        assert result.sections[0].subsections[0].heading == "Sub"
+        assert result.sections[0].subsections[0].level == 2
+
+
+class TestGeminiFallbackToGroq:
+    def test_gemini_fallback_to_groq(self):
+        """When Gemini fails all retries, Groq is called and returns a valid AST."""
+        ds = _structurer()
+        ds._gemini_client.generate_content.side_effect = Exception("Gemini down")
+        ds._groq_client.chat.completions.create.return_value = MagicMock(
+            choices=[MagicMock(message=MagicMock(content=_VALID_RESPONSE))]
+        )
+
+        with patch("time.sleep"):
+            result = ds.structure(_make_blocks())
+
+        assert isinstance(result, DocumentAST)
+        assert result.title == "Test Document"
+        assert ds._groq_client.chat.completions.create.called
+
+    def test_groq_not_called_when_gemini_succeeds(self):
+        """Groq must not be invoked when Gemini succeeds on the first attempt."""
+        ds = _structurer()
+        ds._gemini_client.generate_content.return_value = MagicMock(text=_VALID_RESPONSE)
+
+        ds.structure(_make_blocks())
+
+        ds._groq_client.chat.completions.create.assert_not_called()
+
+
+class TestInvalidJsonTriggersRetry:
+    def test_invalid_json_triggers_retry(self):
+        """First call returns invalid JSON; second call returns valid JSON. Gemini called twice."""
+        ds = _structurer()
+        ds._gemini_client.generate_content.side_effect = [
+            MagicMock(text="not valid json at all"),
+            MagicMock(text=_VALID_RESPONSE),
+        ]
+
+        with patch("time.sleep") as mock_sleep:
+            result = ds.structure(_make_blocks())
+
+        assert isinstance(result, DocumentAST)
+        assert ds._gemini_client.generate_content.call_count == 2
+        mock_sleep.assert_called_once_with(1)
+
+    def test_strict_prompt_used_on_retry(self):
+        """The stricter prompt suffix is appended on the second attempt."""
+        from docstream.core.structurer import _STRICT_SUFFIX
+
+        ds = _structurer()
+        received_prompts: list[str] = []
+
+        def capture(prompt: str) -> MagicMock:
+            received_prompts.append(prompt)
+            if len(received_prompts) == 1:
+                return MagicMock(text="bad json")
+            return MagicMock(text=_VALID_RESPONSE)
+
+        ds._gemini_client.generate_content.side_effect = capture
+
+        with patch("time.sleep"):
+            ds.structure(_make_blocks())
+
+        assert _STRICT_SUFFIX not in received_prompts[0]
+        assert received_prompts[1].endswith(_STRICT_SUFFIX)
+
+
+class TestMissingApiKeyRaisesError:
+    def test_missing_api_key_raises_error(self):
+        """Empty keys → no clients → StructuringError on structure()."""
+        with patch("docstream.core.structurer.genai"):
+            with patch("docstream.core.structurer.Groq"):
+                ds = DocumentStructurer(gemini_key="", groq_key=None)
+
+        with pytest.raises(StructuringError, match="No AI provider available"):
+            ds.structure(_make_blocks())
+
+    def test_groq_only_works_without_gemini(self):
+        """Groq-only setup (no Gemini key) falls through to Groq successfully."""
+        with patch("docstream.core.structurer.genai"):
+            with patch("docstream.core.structurer.Groq"):
+                ds = DocumentStructurer(gemini_key="", groq_key="fake-groq")
+        ds._groq_client = MagicMock()
+        ds._groq_client.chat.completions.create.return_value = MagicMock(
+            choices=[MagicMock(message=MagicMock(content=_VALID_RESPONSE))]
+        )
+
+        result = ds.structure(_make_blocks())
 
         assert isinstance(result, DocumentAST)
 
-    @patch("docstream.core.structurer.genai")
-    def test_structure_creates_sections(self, mock_genai, sample_raw_content):
-        """GeminiStructurer should produce at least one section."""
-        mock_model = MagicMock()
-        mock_model.generate_content.return_value.text = MOCK_AI_RESPONSE
-        mock_genai.GenerativeModel.return_value = mock_model
 
-        structurer = GeminiStructurer(api_key="fake_key")
-        result = structurer.structure(sample_raw_content)
+class TestPromptTruncationForLargeDocuments:
+    def test_prompt_truncation_for_large_documents(self):
+        """A document whose blocks exceed _MAX_CONTENT_CHARS is truncated in the prompt."""
+        char_per_block = 1000
+        n_blocks = (_MAX_CONTENT_CHARS // char_per_block) + 10
+        large_blocks = [
+            TextBlock(type=BlockType.TEXT, content="x" * char_per_block) for _ in range(n_blocks)
+        ]
 
-        assert len(result.sections) >= 1
+        ds = _structurer()
+        prompt = ds._build_prompt(large_blocks)
 
-    @patch("docstream.core.structurer.genai")
-    def test_structure_raises_on_invalid_response(self, mock_genai, sample_raw_content):
-        """GeminiStructurer should raise StructuringError for non-JSON responses."""
-        mock_model = MagicMock()
-        mock_model.generate_content.return_value.text = "not valid json at all"
-        mock_genai.GenerativeModel.return_value = mock_model
+        assert "[...document truncated to fit token limit...]" in prompt
 
-        structurer = GeminiStructurer(api_key="fake_key")
-        with pytest.raises(StructuringError):
-            structurer.structure(sample_raw_content)
+    def test_prompt_within_limit_for_small_documents(self):
+        """Small documents are not truncated."""
+        ds = _structurer()
+        prompt = ds._build_prompt(_make_blocks(5))
 
-    @patch("docstream.core.structurer.genai")
-    def test_structure_propagates_metadata(self, mock_genai, sample_raw_content):
-        """Structured DocumentAST should carry the original metadata."""
-        mock_model = MagicMock()
-        mock_model.generate_content.return_value.text = MOCK_AI_RESPONSE
-        mock_genai.GenerativeModel.return_value = mock_model
+        assert "[...document truncated" not in prompt
 
-        structurer = GeminiStructurer(api_key="fake_key")
-        result = structurer.structure(sample_raw_content)
+    def test_prompt_contains_font_size_hints(self):
+        """Blocks with font_size metadata include the hint in the prompt."""
+        block = TextBlock(
+            type=BlockType.TEXT,
+            content="A heading",
+            metadata={"font_size": 18},
+        )
+        ds = _structurer()
+        prompt = ds._build_prompt([block])
 
-        assert result.metadata == sample_raw_content.metadata
-
-
-class TestGroqStructurer:
-    """Unit tests for GroqStructurer."""
-
-    @patch("docstream.core.structurer.Groq")
-    def test_structure_returns_document_ast(self, mock_groq_cls, sample_raw_content):
-        """GroqStructurer.structure should return a DocumentAST."""
-        mock_client = MagicMock()
-        mock_client.chat.completions.create.return_value.choices[
-            0
-        ].message.content = MOCK_AI_RESPONSE
-        mock_groq_cls.return_value = mock_client
-
-        structurer = GroqStructurer(api_key="fake_key")
-        result = structurer.structure(sample_raw_content)
-
-        assert isinstance(result, DocumentAST)
-
-    @patch("docstream.core.structurer.Groq")
-    def test_structure_raises_on_api_error(self, mock_groq_cls, sample_raw_content):
-        """GroqStructurer should raise StructuringError when API call fails."""
-        mock_client = MagicMock()
-        mock_client.chat.completions.create.side_effect = Exception("API error")
-        mock_groq_cls.return_value = mock_client
-
-        structurer = GroqStructurer(api_key="fake_key")
-        with pytest.raises(StructuringError):
-            structurer.structure(sample_raw_content)
-
-
-class TestStructurer:
-    """Unit tests for the main Structurer dispatcher."""
-
-    def test_raises_when_no_models_configured(self, sample_raw_content):
-        """Structurer with no API keys should raise StructuringError."""
-        structurer = Structurer()  # no API keys
-        with pytest.raises(StructuringError):
-            structurer.structure(sample_raw_content)
-
-    def test_get_available_models_empty(self):
-        """No API keys → no available models."""
-        structurer = Structurer()
-        assert structurer.get_available_models() == []
-
-    @patch("docstream.core.structurer.genai")
-    def test_get_available_models_with_gemini(self, mock_genai):
-        """Gemini key present → 'gemini' in available models."""
-        mock_genai.GenerativeModel.return_value = MagicMock()
-        structurer = Structurer(gemini_api_key="fake_key")
-        assert "gemini" in structurer.get_available_models()
-
-    @patch("docstream.core.structurer.Groq")
-    def test_set_preferred_model(self, mock_groq_cls):
-        """set_preferred_model should update the preferred model."""
-        mock_groq_cls.return_value = MagicMock()
-        structurer = Structurer(groq_api_key="fake_key", preferred_model="groq")
-        structurer.set_preferred_model("groq")
-        assert structurer.preferred_model == "groq"
-
-    def test_set_preferred_model_raises_for_unavailable(self):
-        """set_preferred_model should raise ValueError for unknown models."""
-        structurer = Structurer()
-        with pytest.raises(ValueError):
-            structurer.set_preferred_model("nonexistent_model")
-
-    @patch("docstream.core.structurer.genai")
-    def test_falls_back_to_secondary_model(self, mock_genai, sample_raw_content):
-        """Structurer should fall back to groq when gemini fails."""
-        # Gemini raises, groq succeeds
-        mock_model = MagicMock()
-        mock_model.generate_content.side_effect = Exception("Gemini down")
-        mock_genai.GenerativeModel.return_value = mock_model
-
-        with patch("docstream.core.structurer.Groq") as mock_groq_cls:
-            mock_client = MagicMock()
-            mock_client.chat.completions.create.return_value.choices[
-                0
-            ].message.content = MOCK_AI_RESPONSE
-            mock_groq_cls.return_value = mock_client
-
-            structurer = Structurer(
-                gemini_api_key="fake_gemini",
-                groq_api_key="fake_groq",
-                preferred_model="gemini",
-            )
-            result = structurer.structure(sample_raw_content)
-            assert isinstance(result, DocumentAST)
+        assert "[font_size=18]" in prompt
