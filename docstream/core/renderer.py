@@ -184,7 +184,7 @@ class LuaRenderer(BaseRenderer):
         sections_content = ""
         if "document" in context and hasattr(context["document"], "sections"):
             for section in context["document"].sections:
-                sections_content += f"\\section{{{section.title}}}\n"
+                sections_content += f"\\section{{{section.heading}}}\n"
                 for block in section.blocks:
                     if hasattr(block, "content"):
                         sections_content += f"{block.content}\n\n"

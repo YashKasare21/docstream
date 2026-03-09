@@ -1,305 +1,331 @@
 """
-Content extraction from PDF and LaTeX documents.
+Content extraction from PDF documents.
 
-The Extractor class handles parsing of input documents and extraction of
-raw content including text, images, tables, and metadata.
+PDFExtractor uses PyMuPDF for digital PDFs and falls back to Tesseract OCR
+for scanned (image-only) PDFs. A scanned PDF is detected when the total
+extractable character count across all pages is below 100.
 """
 
 import logging
 import os
-from abc import ABC, abstractmethod
 from pathlib import Path
 from typing import Any
 
 import fitz  # PyMuPDF
 
 from docstream.exceptions import ExtractionError
-from docstream.models.document import DocumentMetadata, RawContent
+from docstream.models.document import (
+    BlockType,
+    DocumentMetadata,
+    RawContent,
+    TextBlock,
+)
 
 logger = logging.getLogger(__name__)
 
+# PyMuPDF span flag masks (0-indexed bit positions)
+_FLAG_ITALIC = 1 << 1  # bit 1  → italic
+_FLAG_BOLD = 1 << 4  # bit 4  → bold
 
-class BaseExtractor(ABC):
-    """Abstract base class for document extractors."""
 
-    @abstractmethod
-    def extract(self, file_path: str) -> RawContent:
-        """Extract content from a document file.
+# ---------------------------------------------------------------------------
+# Main class (new Phase-1 interface)
+# ---------------------------------------------------------------------------
+
+
+class PDFExtractor:
+    """Extract content blocks from a PDF file using PyMuPDF.
+
+    Usage::
+
+        extractor = PDFExtractor("doc.pdf")
+        blocks = extractor.extract()
+    """
+
+    SCANNED_THRESHOLD = 100  # total chars below this → treat as scanned
+
+    def __init__(self, pdf_path: str | Path) -> None:
+        """Initialise with the path to a PDF file.
 
         Args:
-            file_path: Path to the document file
-
-        Returns:
-            RawContent object with extracted content
+            pdf_path: Path to the PDF file to extract from.
 
         Raises:
-            ExtractionError: If extraction fails
+            ExtractionError: If the file does not exist.
         """
-        pass
+        self._path = Path(pdf_path)
+        if not self._path.exists():
+            raise ExtractionError(f"File not found: {self._path}")
+        self._doc: fitz.Document | None = None
 
-    @abstractmethod
-    def supports_format(self, file_path: str) -> bool:
-        """Check if the extractor supports the given file format.
+    # ------------------------------------------------------------------
+    # Public API
+    # ------------------------------------------------------------------
 
-        Args:
-            file_path: Path to the file
+    def extract(self) -> list[TextBlock]:
+        """Extract all content blocks from the PDF.
 
         Returns:
-            True if format is supported, False otherwise
-        """
-        pass
-
-
-class PDFExtractor(BaseExtractor):
-    """Extractor for PDF documents using PyMuPDF."""
-
-    def __init__(self, ocr_enabled: bool = False):
-        """Initialize PDF extractor.
-
-        Args:
-            ocr_enabled: Whether to enable OCR for scanned PDFs
-        """
-        self.ocr_enabled = ocr_enabled
-
-    def extract(self, file_path: str) -> RawContent:
-        """Extract content from PDF file.
-
-        Args:
-            file_path: Path to PDF file
-
-        Returns:
-            RawContent with extracted PDF content
+            Ordered list of Blocks (text, table, image) across all pages.
 
         Raises:
-            ExtractionError: If PDF extraction fails
+            ExtractionError: On any extraction failure.
         """
         try:
-            logger.info(f"Extracting content from PDF: {file_path}")
+            self._doc = fitz.open(str(self._path))
+            page_count = len(self._doc)
+            logger.info("Opened '%s' — %d page(s)", self._path.name, page_count)
 
-            if not os.path.exists(file_path):
-                raise ExtractionError(f"File not found: {file_path}")
+            if self._is_scanned():
+                logger.info("Scanned PDF detected — routing to Tesseract OCR")
+                blocks = self._run_ocr()
+            else:
+                text_blocks = self._extract_text_blocks()
+                table_blocks = self._extract_tables()
+                image_blocks = self._extract_images()
+                blocks = text_blocks + table_blocks + image_blocks
+                logger.info(
+                    "Extracted %d text, %d table, %d image blocks",
+                    len(text_blocks),
+                    len(table_blocks),
+                    len(image_blocks),
+                )
 
-            # Open PDF document
-            doc = fitz.open(file_path)
+            self._doc.close()
+            return blocks
 
-            # Extract metadata
-            metadata = self._extract_metadata(doc)
+        except ExtractionError:
+            raise
+        except Exception as exc:
+            raise ExtractionError(f"PDF extraction failed for '{self._path}': {exc}") from exc
 
-            # Extract text content
-            text_content = []
-            for page_num in range(len(doc)):
-                page = doc[page_num]
-                text = page.get_text()
-                text_content.append(text)
+    # ------------------------------------------------------------------
+    # Scanned detection
+    # ------------------------------------------------------------------
 
-            # Extract images
-            images = self._extract_images(doc)
-
-            # Extract tables (basic implementation)
-            tables = self._extract_tables(doc)
-
-            doc.close()
-
-            return RawContent(
-                text="\n".join(text_content),
-                metadata=metadata,
-                images=images,
-                tables=tables,
-                source_format="pdf",
-            )
-
-        except Exception as e:
-            logger.error(f"PDF extraction failed: {e}")
-            raise ExtractionError(f"Failed to extract PDF content: {e}")
-
-    def supports_format(self, file_path: str) -> bool:
-        """Check if file is a PDF."""
-        return Path(file_path).suffix.lower() == ".pdf"
-
-    def _extract_metadata(self, doc: fitz.Document) -> DocumentMetadata:
-        """Extract metadata from PDF document."""
-        metadata = doc.metadata
-
-        return DocumentMetadata(
-            title=metadata.get("title"),
-            author=metadata.get("author"),
-            subject=metadata.get("subject"),
-            keywords=metadata.get("keywords", "").split(",") if metadata.get("keywords") else [],
-            page_count=len(doc),
-            language="en",  # Default language
+    def _is_scanned(self) -> bool:
+        """Return True when the PDF has fewer than SCANNED_THRESHOLD characters."""
+        total = sum(len(page.get_text()) for page in self._doc)
+        result = total < self.SCANNED_THRESHOLD
+        logger.info(
+            "Scanned detection: %d total chars → %s",
+            total,
+            "scanned" if result else "digital",
         )
+        return result
 
-    def _extract_images(self, doc: fitz.Document) -> list[dict[str, Any]]:
-        """Extract images from PDF document."""
-        images = []
+    # ------------------------------------------------------------------
+    # Text extraction
+    # ------------------------------------------------------------------
 
-        for page_num in range(len(doc)):
-            page = doc[page_num]
-            image_list = page.get_images()
+    def _extract_text_blocks(self) -> list[TextBlock]:
+        """Extract text spans from all pages, preserving font metadata."""
+        blocks: list[TextBlock] = []
+        for page_num, page in enumerate(self._doc):
+            raw = page.get_text("dict")
+            for block in raw.get("blocks", []):
+                if block.get("type") != 0:  # 0 = text block
+                    continue
+                for line in block.get("lines", []):
+                    for span in line.get("spans", []):
+                        text = span.get("text", "").strip()
+                        if not text:
+                            continue
+                        flags = span.get("flags", 0)
+                        is_bold = bool(flags & _FLAG_BOLD)
+                        is_italic = bool(flags & _FLAG_ITALIC)
+                        raw_bbox = span.get("bbox", (0.0, 0.0, 0.0, 0.0))
+                        blocks.append(
+                            TextBlock(
+                                type=BlockType.TEXT,
+                                content=text,
+                                font_size=span.get("size"),
+                                font_name=span.get("font"),
+                                font_flags=flags,
+                                bbox=tuple(raw_bbox),
+                                page_number=page_num,
+                                is_bold=is_bold,
+                                is_italic=is_italic,
+                            )
+                        )
+        logger.info("Text extraction: %d spans across all pages", len(blocks))
+        return blocks
 
-            for img_index, img in enumerate(image_list):
-                xref = img[0]
-                pix = fitz.Pixmap(doc, xref)
+    # ------------------------------------------------------------------
+    # Table extraction
+    # ------------------------------------------------------------------
 
-                if pix.n - pix.alpha < 4:  # GRAY or RGB
-                    img_data = pix.tobytes("png")
-                    images.append(
-                        {
-                            "page": page_num,
-                            "index": img_index,
-                            "data": img_data,
-                            "width": pix.width,
-                            "height": pix.height,
-                        }
+    def _extract_tables(self) -> list[TextBlock]:
+        """Detect tables with PyMuPDF find_tables() and render as Markdown."""
+        blocks: list[TextBlock] = []
+        for page_num, page in enumerate(self._doc):
+            try:
+                finder = page.find_tables()
+                for table in finder.tables:
+                    rows = table.extract()
+                    content = self._rows_to_markdown(rows)
+                    raw_bbox = table.bbox if hasattr(table, "bbox") else (0.0, 0.0, 0.0, 0.0)
+                    blocks.append(
+                        TextBlock(
+                            type=BlockType.TABLE,
+                            content=content,
+                            bbox=tuple(raw_bbox),
+                            page_number=page_num,
+                        )
                     )
+            except Exception as exc:
+                logger.warning("Table extraction skipped on page %d: %s", page_num, exc)
+        logger.info("Table extraction: %d table(s) found", len(blocks))
+        return blocks
 
-                pix = None  # Free memory
+    @staticmethod
+    def _rows_to_markdown(rows: list[list[Any]]) -> str:
+        """Convert a table row list to a Markdown table string."""
+        if not rows:
+            return ""
 
-        return images
+        def _cell(v: Any) -> str:
+            return str(v).replace("|", "\\|").strip() if v is not None else ""
 
-    def _extract_tables(self, doc: fitz.Document) -> list[dict[str, Any]]:
-        """Extract tables from PDF document (basic implementation)."""
-        # This is a placeholder for table extraction
-        # In a full implementation, you would use more sophisticated
-        # table detection algorithms
-        tables = []
+        header = rows[0]
+        md_lines = [
+            "| " + " | ".join(_cell(c) for c in header) + " |",
+            "| " + " | ".join("---" for _ in header) + " |",
+        ]
+        for row in rows[1:]:
+            md_lines.append("| " + " | ".join(_cell(c) for c in row) + " |")
+        return "\n".join(md_lines)
 
-        for _page_num in range(len(doc)):
-            # Basic table detection logic would go here
-            # For now, return empty list
-            pass
+    # ------------------------------------------------------------------
+    # Image extraction
+    # ------------------------------------------------------------------
 
-        return tables
+    def _extract_images(self) -> list[TextBlock]:
+        """Return a lightweight Block for every embedded image in the PDF."""
+        blocks: list[TextBlock] = []
+        for page_num, page in enumerate(self._doc):
+            for idx, img_info in enumerate(page.get_images(full=True)):
+                xref = img_info[0]
+                blocks.append(
+                    TextBlock(
+                        type=BlockType.IMAGE,
+                        content=f"image:xref={xref}:page={page_num}:index={idx}",
+                        page_number=page_num,
+                    )
+                )
+        logger.info("Image extraction: %d image(s) found", len(blocks))
+        return blocks
+
+    # ------------------------------------------------------------------
+    # OCR fallback
+    # ------------------------------------------------------------------
+
+    def _run_ocr(self) -> list[TextBlock]:
+        """Run Tesseract OCR over every page and return text blocks."""
+        try:
+            import pytesseract
+            from PIL import Image as PILImage
+        except ImportError as exc:
+            raise ExtractionError(
+                "pytesseract and Pillow are required for OCR. "
+                "Install them with: uv add pytesseract Pillow"
+            ) from exc
+
+        blocks: list[TextBlock] = []
+        for page_num, page in enumerate(self._doc):
+            try:
+                pix = page.get_pixmap(dpi=300)
+                img = PILImage.frombytes("RGB", [pix.width, pix.height], pix.samples)
+                text = pytesseract.image_to_string(img)
+                if text.strip():
+                    blocks.append(
+                        TextBlock(
+                            type=BlockType.TEXT,
+                            content=text.strip(),
+                            page_number=page_num,
+                        )
+                    )
+            except Exception as exc:
+                logger.warning("OCR failed on page %d: %s", page_num, exc)
+
+        logger.info("OCR extracted %d text blocks", len(blocks))
+        return blocks
 
 
-class LaTeXExtractor(BaseExtractor):
-    """Extractor for LaTeX documents."""
+# ---------------------------------------------------------------------------
+# Legacy / backward-compat classes kept for the Extractor dispatcher
+# ---------------------------------------------------------------------------
+
+
+class LaTeXExtractor:
+    """Extractor for LaTeX source files."""
 
     def extract(self, file_path: str) -> RawContent:
-        """Extract content from LaTeX file.
+        """Extract content from a .tex / .latex file."""
 
-        Args:
-            file_path: Path to LaTeX file
-
-        Returns:
-            RawContent with extracted LaTeX content
-
-        Raises:
-            ExtractionError: If LaTeX extraction fails
-        """
         try:
-            logger.info(f"Extracting content from LaTeX: {file_path}")
-
             if not os.path.exists(file_path):
                 raise ExtractionError(f"File not found: {file_path}")
 
-            with open(file_path, encoding="utf-8") as f:
-                content = f.read()
+            with open(file_path, encoding="utf-8") as fh:
+                content = fh.read()
 
-            # Extract basic metadata from LaTeX
-            metadata = self._extract_latex_metadata(content)
+            metadata = self._extract_metadata(content)
+            text = self._clean_text(content)
+            return RawContent(text=text, metadata=metadata, source_format="latex")
 
-            # Extract text content (remove LaTeX commands)
-            text_content = self._clean_latex_text(content)
-
-            return RawContent(
-                text=text_content, metadata=metadata, images=[], tables=[], source_format="latex"
-            )
-
-        except Exception as e:
-            logger.error(f"LaTeX extraction failed: {e}")
-            raise ExtractionError(f"Failed to extract LaTeX content: {e}")
+        except ExtractionError:
+            raise
+        except Exception as exc:
+            raise ExtractionError(f"LaTeX extraction failed: {exc}") from exc
 
     def supports_format(self, file_path: str) -> bool:
-        """Check if file is a LaTeX file."""
-        return Path(file_path).suffix.lower() in [".tex", ".latex"]
+        return Path(file_path).suffix.lower() in {".tex", ".latex"}
 
-    def _extract_latex_metadata(self, content: str) -> DocumentMetadata:
-        """Extract metadata from LaTeX content."""
+    def _extract_metadata(self, content: str) -> DocumentMetadata:
         import re
 
-        metadata = DocumentMetadata()
+        meta = DocumentMetadata()
+        m = re.search(r"\\title\{([^}]+)\}", content)
+        if m:
+            meta.title = m.group(1)
+        m = re.search(r"\\author\{([^}]+)\}", content)
+        if m:
+            meta.author = m.group(1)
+        return meta
 
-        # Extract title
-        title_match = re.search(r"\\title\{([^}]+)\}", content)
-        if title_match:
-            metadata.title = title_match.group(1)
-
-        # Extract author
-        author_match = re.search(r"\\author\{([^}]+)\}", content)
-        if author_match:
-            metadata.author = author_match.group(1)
-
-        return metadata
-
-    def _clean_latex_text(self, content: str) -> str:
-        """Remove LaTeX commands and return clean text."""
+    def _clean_text(self, content: str) -> str:
         import re
 
-        # Remove comments
         content = re.sub(r"%.*$", "", content, flags=re.MULTILINE)
-
-        # Remove common LaTeX commands but keep their content
         content = re.sub(r"\\[a-zA-Z]+\{([^}]+)\}", r"\1", content)
-
-        # Remove remaining LaTeX commands
         content = re.sub(r"\\[a-zA-Z]+", "", content)
-
-        # Clean up extra whitespace
-        content = re.sub(r"\s+", " ", content).strip()
-
-        return content
+        return re.sub(r"\s+", " ", content).strip()
 
 
 class Extractor:
-    """Main extractor class that delegates to format-specific extractors."""
+    """Dispatcher — routes files to PDFExtractor or LaTeXExtractor."""
 
-    def __init__(self, ocr_enabled: bool = False):
-        """Initialize extractor with available format extractors.
-
-        Args:
-            ocr_enabled: Whether to enable OCR for scanned documents
-        """
-        self.extractors = [
-            PDFExtractor(ocr_enabled=ocr_enabled),
-            LaTeXExtractor(),
-        ]
+    def __init__(self, ocr_enabled: bool = False) -> None:
+        self._ocr_enabled = ocr_enabled
+        self._latex = LaTeXExtractor()
 
     def extract(self, file_path: str) -> RawContent:
-        """Extract content from a document file.
+        """Extract content and return a RawContent object (backward-compat)."""
+        path = Path(file_path)
+        suffix = path.suffix.lower()
 
-        Args:
-            file_path: Path to the document file
+        if suffix == ".pdf":
+            pdf_ext = PDFExtractor(file_path)
+            blocks = pdf_ext.extract()
+            text = "\n".join(b.content for b in blocks if b.type == BlockType.TEXT)
+            metadata = DocumentMetadata(page_count=None)
+            return RawContent(text=text, metadata=metadata, source_format="pdf")
 
-        Returns:
-            RawContent object with extracted content
+        if suffix in {".tex", ".latex"}:
+            return self._latex.extract(file_path)
 
-        Raises:
-            ExtractionError: If no suitable extractor is found or extraction fails
-        """
-        logger.info(f"Extracting content from: {file_path}")
-
-        # Find appropriate extractor
-        extractor = self._get_extractor(file_path)
-        if not extractor:
-            raise ExtractionError(f"Unsupported file format: {file_path}")
-
-        # Extract content
-        return extractor.extract(file_path)
-
-    def _get_extractor(self, file_path: str) -> BaseExtractor | None:
-        """Get appropriate extractor for the file format."""
-        for extractor in self.extractors:
-            if extractor.supports_format(file_path):
-                return extractor
-        return None
+        raise ExtractionError(f"Unsupported file format: {file_path}")
 
     def get_supported_formats(self) -> list[str]:
-        """Get list of supported file formats."""
-        formats = []
-        for extractor in self.extractors:
-            if isinstance(extractor, PDFExtractor):
-                formats.append("pdf")
-            elif isinstance(extractor, LaTeXExtractor):
-                formats.extend(["tex", "latex"])
-        return formats
+        return ["pdf", "tex", "latex"]

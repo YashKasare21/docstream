@@ -53,6 +53,15 @@ class Block(BaseModel):
     id: str = Field(default_factory=lambda: str(uuid.uuid4()))
     metadata: dict[str, Any] = Field(default_factory=dict)
 
+    # Extraction-level metadata
+    font_size: float | None = None
+    font_name: str | None = None
+    font_flags: int | None = None
+    bbox: tuple[float, float, float, float] | None = None
+    page_number: int = 0
+    is_bold: bool = False
+    is_italic: bool = False
+
 
 class TextBlock(Block):
     """Text content block."""
@@ -145,45 +154,6 @@ class DocumentMetadata(BaseModel):
         return v
 
 
-class Section(BaseModel):
-    """Document section with hierarchical structure."""
-
-    title: str
-    level: int = Field(ge=1, le=6)
-    blocks: list[Block] = Field(default_factory=list)
-    subsections: list["Section"] = Field(default_factory=list)
-    parent_id: str | None = None
-    id: str = Field(default_factory=lambda: str(uuid.uuid4()))
-
-    @field_validator("level")
-    @classmethod
-    def validate_section_level(cls, v: int) -> int:
-        if v < 1 or v > 6:
-            raise ValueError("Section level must be between 1 and 6")
-        return v
-
-    def add_block(self, block: Block) -> None:
-        """Add a block to this section."""
-        self.blocks.append(block)
-
-    def add_subsection(self, subsection: "Section") -> None:
-        """Add a subsection to this section."""
-        subsection.parent_id = self.id
-        subsection.level = self.level + 1
-        self.subsections.append(subsection)
-
-    def get_all_blocks(self) -> list[Block]:
-        """Get all blocks including from subsections."""
-        all_blocks = self.blocks.copy()
-        for subsection in self.subsections:
-            all_blocks.extend(subsection.get_all_blocks())
-        return all_blocks
-
-
-# Update forward references
-Section.model_rebuild()
-
-
 class Table(BaseModel):
     """Table content model."""
 
@@ -247,9 +217,54 @@ class Image(BaseModel):
         return None
 
 
+class Section(BaseModel):
+    """Document section with hierarchical structure."""
+
+    heading: str
+    level: int = Field(ge=1, le=6)
+    content: list[str] = Field(default_factory=list)
+    blocks: list[Block] = Field(default_factory=list)
+    tables: list[Table] = Field(default_factory=list)
+    images: list[Image] = Field(default_factory=list)
+    subsections: list["Section"] = Field(default_factory=list)
+    parent_id: str | None = None
+    id: str = Field(default_factory=lambda: str(uuid.uuid4()))
+
+    @field_validator("level")
+    @classmethod
+    def validate_section_level(cls, v: int) -> int:
+        if v < 1 or v > 6:
+            raise ValueError("Section level must be between 1 and 6")
+        return v
+
+    def add_block(self, block: Block) -> None:
+        """Add a block to this section."""
+        self.blocks.append(block)
+
+    def add_subsection(self, subsection: "Section") -> None:
+        """Add a subsection to this section."""
+        subsection.parent_id = self.id
+        subsection.level = self.level + 1
+        self.subsections.append(subsection)
+
+    def get_all_blocks(self) -> list[Block]:
+        """Get all blocks including from subsections."""
+        all_blocks = self.blocks.copy()
+        for subsection in self.subsections:
+            all_blocks.extend(subsection.get_all_blocks())
+        return all_blocks
+
+
+# Update forward references
+Section.model_rebuild()
+
+
 class DocumentAST(BaseModel):
     """Abstract Syntax Tree for document structure."""
 
+    title: str = ""
+    authors: list[str] = Field(default_factory=list)
+    abstract: str | None = None
     metadata: DocumentMetadata
     sections: list[Section] = Field(default_factory=list)
     blocks: list[Block] = Field(default_factory=list)
@@ -257,20 +272,19 @@ class DocumentAST(BaseModel):
     images: list[Image] = Field(default_factory=list)
 
     def get_section_by_title(self, title: str) -> Section | None:
-        """Find section by title."""
+        """Find section by heading text."""
         for section in self.sections:
-            if section.title == title:
+            if section.heading == title:
                 return section
-            # Check subsections recursively
             subsection = self._find_subsection_by_title(section, title)
             if subsection:
                 return subsection
         return None
 
     def _find_subsection_by_title(self, parent: Section, title: str) -> Section | None:
-        """Recursively find subsection by title."""
+        """Recursively find subsection by heading text."""
         for subsection in parent.subsections:
-            if subsection.title == title:
+            if subsection.heading == title:
                 return subsection
             result = self._find_subsection_by_title(subsection, title)
             if result:
@@ -283,7 +297,7 @@ class DocumentAST(BaseModel):
 
     def to_dict(self) -> dict[str, Any]:
         """Convert DocumentAST to dictionary."""
-        return self.dict()
+        return self.model_dump()
 
     def get_all_blocks(self) -> list[Block]:
         """Get all blocks from all sections."""
