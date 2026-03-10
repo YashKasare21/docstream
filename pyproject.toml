@@ -76,7 +76,7 @@ dev = [
 target-version = "py311"
 line-length = 100
 src = ["docstream", "tests"]
-exclude = ["test_pdfs"]
+exclude = ["test_pdfs", "manual_tests"]
 
 [tool.ruff.lint]
 select = ["E", "W", "F", "I", "N", "UP"]
