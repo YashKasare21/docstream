@@ -5,17 +5,21 @@ The Renderer class handles conversion of DocumentAST to target formats
 using Lua templates and LaTeX compilation.
 """
 
+import json
 import logging
 import os
 import re
+import shutil
 import subprocess
+import tempfile
+import time
 from abc import ABC, abstractmethod
 from enum import StrEnum
 from pathlib import Path
 from typing import Any
 
 from docstream.exceptions import RenderingError
-from docstream.models.document import DocumentAST
+from docstream.models.document import ConversionResult, DocumentAST, Section
 
 logger = logging.getLogger(__name__)
 
@@ -415,3 +419,215 @@ class Renderer:
             return True
         except Exception:
             return False
+
+
+# ---------------------------------------------------------------------------
+# Phase-3: DocumentRenderer
+# ---------------------------------------------------------------------------
+
+_VALID_TEMPLATES = {"report", "ieee", "resume"}
+
+_TEMPLATES_DIR = Path(__file__).parent.parent / "templates"
+
+
+class DocumentRenderer:
+    """Render a DocumentAST to .tex and .pdf via Pandoc + XeLaTeX."""
+
+    VALID_TEMPLATES = _VALID_TEMPLATES
+
+    def __init__(self, template: str = "report") -> None:
+        if template not in _VALID_TEMPLATES:
+            raise ValueError(
+                f"Unknown template '{template}'. Must be one of {sorted(_VALID_TEMPLATES)}"
+            )
+        self.template = template
+        self._template_dir = _TEMPLATES_DIR
+        self._check_pandoc()
+
+    # ------------------------------------------------------------------
+    # Public API
+    # ------------------------------------------------------------------
+
+    def render(self, ast: DocumentAST, output_dir: Path) -> ConversionResult:
+        """Convert *ast* to .tex and .pdf inside *output_dir*."""
+        start = time.monotonic()
+        tmp_dir = Path(tempfile.mkdtemp(prefix="docstream_render_"))
+        try:
+            output_dir = Path(output_dir)
+            output_dir.mkdir(parents=True, exist_ok=True)
+
+            pandoc_json = self._ast_to_pandoc_json(ast)
+            tex_content = self._run_pandoc(pandoc_json, self.template)
+
+            tex_path = output_dir / "document.tex"
+            tex_path.write_text(tex_content, encoding="utf-8")
+
+            pdf_path = self._compile_latex(tex_content, output_dir)
+
+            elapsed = time.monotonic() - start
+            logger.info("Rendered '%s' template in %.2fs → %s", self.template, elapsed, pdf_path)
+            return ConversionResult(
+                success=True,
+                tex_path=tex_path,
+                pdf_path=pdf_path,
+                processing_time_seconds=elapsed,
+                template_used=self.template,
+            )
+        except Exception as exc:  # noqa: BLE001
+            elapsed = time.monotonic() - start
+            logger.error("Rendering failed: %s", exc)
+            return ConversionResult(
+                success=False,
+                error=str(exc),
+                processing_time_seconds=elapsed,
+                template_used=self.template,
+            )
+        finally:
+            self._cleanup(tmp_dir)
+
+    # ------------------------------------------------------------------
+    # Private helpers
+    # ------------------------------------------------------------------
+
+    def _check_pandoc(self) -> None:
+        """Raise RenderingError when pandoc is not installed."""
+        try:
+            subprocess.run(
+                ["pandoc", "--version"],
+                capture_output=True,
+                check=True,
+                timeout=10,
+            )
+        except FileNotFoundError as exc:
+            raise RenderingError("Pandoc not found. Install from pandoc.org") from exc
+        except subprocess.CalledProcessError as exc:
+            raise RenderingError(f"Pandoc version check failed: {exc}") from exc
+
+    def _ast_to_pandoc_json(self, ast: DocumentAST) -> dict[str, Any]:
+        """Convert *DocumentAST* to a valid Pandoc native JSON dict."""
+
+        def _inlines(text: str) -> list[dict]:
+            nodes: list[dict] = []
+            for i, word in enumerate(text.split(" ")):
+                if word:
+                    nodes.append({"t": "Str", "c": word})
+                if i < len(text.split(" ")) - 1:
+                    nodes.append({"t": "Space"})
+            return nodes
+
+        def _section_blocks(section: Section) -> list[dict]:
+            blocks: list[dict] = []
+            attr = [section.heading.lower().replace(" ", "-"), [], []]
+            blocks.append({"t": "Header", "c": [section.level, attr, _inlines(section.heading)]})
+            for para in section.content:
+                if para.strip():
+                    blocks.append({"t": "Para", "c": _inlines(para)})
+            for table in section.tables:
+                caption = table.caption or ""
+                blocks.append(
+                    {"t": "Para", "c": _inlines(f"[Table{': ' + caption if caption else ''}]")}
+                )
+            for sub in section.subsections:
+                blocks.extend(_section_blocks(sub))
+            return blocks
+
+        pandoc_blocks: list[dict] = []
+        if ast.title:
+            pandoc_blocks.append(
+                {"t": "Header", "c": [1, ["doc-title", [], []], _inlines(ast.title)]}
+            )
+        if ast.abstract:
+            pandoc_blocks.append({"t": "Para", "c": _inlines(ast.abstract)})
+        for section in ast.sections:
+            pandoc_blocks.extend(_section_blocks(section))
+
+        meta: dict[str, Any] = {}
+        if ast.title:
+            meta["title"] = {"t": "MetaInlines", "c": _inlines(ast.title)}
+        if ast.authors:
+            meta["author"] = {
+                "t": "MetaList",
+                "c": [{"t": "MetaInlines", "c": _inlines(a)} for a in ast.authors],
+            }
+
+        return {
+            "pandoc-api-version": [1, 23, 1],
+            "meta": meta,
+            "blocks": pandoc_blocks,
+        }
+
+    def _run_pandoc(self, pandoc_json: dict[str, Any], template: str) -> str:
+        """Run pandoc to convert Pandoc JSON → LaTeX using the Lua writer."""
+        tmp_dir = Path(tempfile.mkdtemp(prefix="docstream_pandoc_"))
+        try:
+            json_file = tmp_dir / "input.json"
+            json_file.write_text(json.dumps(pandoc_json), encoding="utf-8")
+
+            lua_path = self._template_dir / f"{template}.lua"
+            result = subprocess.run(
+                ["pandoc", "-f", "json", "-t", str(lua_path), str(json_file)],
+                capture_output=True,
+                text=True,
+                timeout=60,
+            )
+            if result.returncode != 0:
+                raise RenderingError(f"Pandoc failed:\n{result.stderr.strip()}")
+            return result.stdout
+        except FileNotFoundError as exc:
+            raise RenderingError("Pandoc not found. Install from pandoc.org") from exc
+        except subprocess.TimeoutExpired as exc:
+            raise RenderingError("Pandoc timed out (>60 s)") from exc
+        finally:
+            self._cleanup(tmp_dir)
+
+    def _compile_latex(self, tex_content: str, output_dir: Path) -> Path:
+        """Compile *tex_content* to PDF with xelatex (run twice for cross-refs)."""
+        tmp_dir = Path(tempfile.mkdtemp(prefix="docstream_xelatex_"))
+        try:
+            tex_file = tmp_dir / "document.tex"
+            tex_file.write_text(tex_content, encoding="utf-8")
+
+            cmd = ["xelatex", "-interaction=nonstopmode", "document.tex"]
+            for _run in range(2):
+                result = subprocess.run(
+                    cmd,
+                    cwd=str(tmp_dir),
+                    capture_output=True,
+                    text=True,
+                    timeout=60,
+                )
+                if result.returncode != 0:
+                    error_msg = self._parse_latex_log(tmp_dir / "document.log", result.stderr)
+                    raise RenderingError(f"LaTeX compilation failed: {error_msg}")
+
+            pdf_src = tmp_dir / "document.pdf"
+            if not pdf_src.exists():
+                raise RenderingError("xelatex ran but produced no PDF file")
+
+            pdf_dest = output_dir / "document.pdf"
+            shutil.copy2(str(pdf_src), str(pdf_dest))
+            return pdf_dest
+        except subprocess.TimeoutExpired as exc:
+            raise RenderingError("xelatex compilation timed out (>60 s)") from exc
+        finally:
+            self._cleanup(tmp_dir)
+
+    def _parse_latex_log(self, log_file: Path, fallback: str) -> str:
+        """Extract lines starting with '!' from the xelatex .log file."""
+        if log_file.exists():
+            errors = [
+                line
+                for line in log_file.read_text(encoding="utf-8", errors="ignore").splitlines()
+                if line.startswith("!")
+            ]
+            if errors:
+                return "\n".join(errors)
+        return fallback.strip() or "Unknown LaTeX error"
+
+    def _cleanup(self, tmp_dir: Path) -> None:
+        """Recursively remove *tmp_dir*, ignoring errors."""
+        if tmp_dir and tmp_dir.exists():
+            try:
+                shutil.rmtree(str(tmp_dir))
+            except Exception as exc:  # noqa: BLE001
+                logger.warning("Cleanup failed for %s: %s", tmp_dir, exc)

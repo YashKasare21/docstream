@@ -8,6 +8,7 @@ content blocks, and conversion results.
 import uuid
 from datetime import datetime
 from enum import StrEnum
+from pathlib import Path
 from typing import Any
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator
@@ -328,6 +329,8 @@ class RawContent(BaseModel):
 class ConversionResult(BaseModel):
     """Result of document conversion operations."""
 
+    model_config = ConfigDict(arbitrary_types_allowed=True)
+
     success: bool
     content: str | None = None  # LaTeX or text content
     pdf_content: bytes | None = None  # PDF bytes
@@ -335,6 +338,13 @@ class ConversionResult(BaseModel):
     errors: list[str] = Field(default_factory=list)
     warnings: list[str] = Field(default_factory=list)
     processing_time: float | None = None
+
+    # Phase 3 fields
+    tex_path: Path | None = None
+    pdf_path: Path | None = None
+    error: str | None = None
+    processing_time_seconds: float = 0.0
+    template_used: str = ""
 
     def save(self, output_path: str) -> bool:
         """Save the result to a file.

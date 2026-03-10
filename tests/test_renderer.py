@@ -1,174 +1,323 @@
 """
-Tests for the Renderer module.
+Tests for Phase-3 DocumentRenderer.
 
-This module contains unit tests for template-based output generation.
-File system and subprocess calls are mocked where appropriate.
+All subprocess calls (pandoc, xelatex) are mocked so tests run
+without a real TeX installation and finish in milliseconds.
 """
+
+from pathlib import Path
+from unittest.mock import MagicMock, patch
 
 import pytest
 
-from docstream.core.renderer import LuaRenderer, Renderer, TemplateInfo, TemplateType
+from docstream.core.renderer import DocumentRenderer
 from docstream.exceptions import RenderingError
+from docstream.models.document import DocumentAST, DocumentMetadata, Section
+
+# ---------------------------------------------------------------------------
+# Shared fixtures & helpers
+# ---------------------------------------------------------------------------
+
+FAKE_TEX = "\\documentclass{article}\\begin{document}Hello world\\end{document}"
 
 
-class TestLuaRenderer:
-    """Unit tests for LuaRenderer."""
-
-    def test_list_templates_returns_list(self, tmp_path):
-        """LuaRenderer.list_templates should return a list."""
-        renderer = LuaRenderer(template_dir=str(tmp_path))
-        assert isinstance(renderer._template_cache, dict)
-
-    def test_get_template_path_raises_for_unknown(self, tmp_path):
-        """LuaRenderer should raise RenderingError for unknown template names."""
-        renderer = LuaRenderer(template_dir=str(tmp_path))
-        with pytest.raises(RenderingError):
-            renderer._get_template_path("nonexistent_template")
-
-    def test_get_template_path_accepts_full_path(self, tmp_path):
-        """LuaRenderer should accept a full path to a template file."""
-        template_file = tmp_path / "custom.lua"
-        template_file.write_text("-- empty template")
-        renderer = LuaRenderer(template_dir=str(tmp_path))
-        path = renderer._get_template_path(str(template_file))
-        assert path == str(template_file)
-
-    def test_escape_latex_ampersand(self):
-        """_escape_latex should escape & as \\&."""
-        renderer = LuaRenderer()
-        result = renderer._escape_latex("a & b")
-        assert r"\&" in result
-
-    def test_escape_latex_percent(self):
-        """_escape_latex should escape % as \\%."""
-        renderer = LuaRenderer()
-        result = renderer._escape_latex("50% done")
-        assert r"\%" in result
-
-    def test_escape_latex_dollar(self):
-        """_escape_latex should escape $ as \\$."""
-        renderer = LuaRenderer()
-        result = renderer._escape_latex("$100")
-        assert r"\$" in result
-
-    def test_escape_latex_empty_string(self):
-        """_escape_latex should handle empty strings gracefully."""
-        renderer = LuaRenderer()
-        assert renderer._escape_latex("") == ""
-
-    def test_template_cache_populated_after_load(self, tmp_path):
-        """Template cache should contain template after first load."""
-        template_file = tmp_path / "test.lua"
-        template_file.write_text("-- simple template")
-        renderer = LuaRenderer(template_dir=str(tmp_path))
-        renderer._load_template(str(template_file))
-        assert str(template_file) in renderer._template_cache
-
-    def test_join_blocks_returns_string(self, sample_document_ast):
-        """_join_blocks should concatenate block contents."""
-        renderer = LuaRenderer()
-        blocks = sample_document_ast.sections[0].blocks
-        result = renderer._join_blocks(blocks)
-        assert isinstance(result, str)
-
-    def test_render_raises_for_missing_template(self, sample_document_ast):
-        """render() should raise RenderingError when template is not found."""
-        renderer = LuaRenderer(template_dir="/nonexistent/dir")
-        with pytest.raises(RenderingError):
-            renderer.render(sample_document_ast, "missing_template")
+@pytest.fixture
+def simple_ast():
+    """Minimal DocumentAST with one section — used by all renderer tests."""
+    meta = DocumentMetadata(title="Test Document", author="Test Author")
+    section = Section(
+        heading="Introduction",
+        level=1,
+        content=["This is a test paragraph.", "Second paragraph of the introduction."],
+    )
+    return DocumentAST(
+        title="Test Document",
+        authors=["Test Author"],
+        metadata=meta,
+        sections=[section],
+    )
 
 
-class TestRenderer:
-    """Unit tests for the main Renderer class."""
+def _make_subprocess_mock(
+    xelatex_fail: bool = False,
+    xelatex_log_content: str | None = None,
+    pandoc_fail: bool = False,
+):
+    """Return a callable suitable for use as subprocess.run side_effect."""
 
-    def test_list_templates_includes_builtins(self, tmp_path):
-        """list_templates should include built-in template names."""
-        renderer = Renderer(template_dir=str(tmp_path))
-        templates = renderer.list_templates()
-        for t in TemplateType:
-            assert t.value in templates
+    def _run(cmd, **kwargs):  # noqa: ANN001
+        if not cmd:
+            return MagicMock(returncode=0)
+        prog = cmd[0]
 
-    def test_get_template_info_ieee(self):
-        """get_template_info should return TemplateInfo for ieee."""
-        renderer = Renderer()
-        info = renderer.get_template_info(TemplateType.IEEE)
-        assert isinstance(info, TemplateInfo)
-        assert info.name == "IEEE"
+        # ---- pandoc --version (init check) --------------------------------
+        if prog == "pandoc" and len(cmd) > 1 and cmd[1] == "--version":
+            return MagicMock(returncode=0, stdout="pandoc 3.1.3", stderr="")
 
-    def test_get_template_info_report(self):
-        """get_template_info should return TemplateInfo for report."""
-        renderer = Renderer()
-        info = renderer.get_template_info(TemplateType.REPORT)
-        assert isinstance(info, TemplateInfo)
+        # ---- pandoc JSON → LaTeX conversion --------------------------------
+        if prog == "pandoc":
+            if pandoc_fail:
+                return MagicMock(returncode=1, stdout="", stderr="pandoc: fatal error")
+            return MagicMock(returncode=0, stdout=FAKE_TEX, stderr="")
 
-    def test_get_template_info_resume(self):
-        """get_template_info should return TemplateInfo for resume."""
-        renderer = Renderer()
-        info = renderer.get_template_info(TemplateType.RESUME)
-        assert isinstance(info, TemplateInfo)
+        # ---- xelatex -------------------------------------------------------
+        if prog == "xelatex":
+            cwd = kwargs.get("cwd", ".")
+            if xelatex_log_content:
+                Path(cwd, "document.log").write_text(xelatex_log_content, encoding="utf-8")
+            if xelatex_fail:
+                return MagicMock(returncode=1, stdout="", stderr="xelatex: compilation failed")
+            # Success: create a fake PDF so _compile_latex finds the file
+            Path(cwd, "document.pdf").write_bytes(b"%PDF-1.4 fake-pdf-content")
+            return MagicMock(returncode=0, stdout="", stderr="")
 
-    def test_get_template_info_custom_string(self):
-        """get_template_info with a custom string should return TemplateInfo."""
-        renderer = Renderer()
-        info = renderer.get_template_info("my_custom_template")
-        assert isinstance(info, TemplateInfo)
-        assert info.name == "my_custom_template"
+        return MagicMock(returncode=0)
 
-    def test_validate_template_returns_false_for_missing(self, tmp_path):
-        """validate_template should return False when file is missing."""
-        renderer = Renderer(template_dir=str(tmp_path))
-        result = renderer.validate_template("/nonexistent/template.lua")
-        assert result is False
-
-    def test_validate_template_returns_true_for_valid_file(self, tmp_path):
-        """validate_template should return True for an existing file."""
-        template_file = tmp_path / "valid.lua"
-        template_file.write_text("-- valid lua template")
-        renderer = Renderer(template_dir=str(tmp_path))
-        result = renderer.validate_template(str(template_file))
-        assert result is True
-
-    def test_render_to_latex_returns_string(self, sample_document_ast, tmp_path):
-        """render_to_latex should return a non-empty string."""
-        template_file = tmp_path / "report.lua"
-        template_file.write_text("-- stub report template")
-        renderer = Renderer(template_dir=str(tmp_path))
-        result = renderer.render_to_latex(sample_document_ast, "report")
-        assert isinstance(result, str)
+    return _run
 
 
-class TestTemplateType:
-    """Tests for the TemplateType enum."""
-
-    def test_enum_values(self):
-        """TemplateType values should match expected strings."""
-        assert TemplateType.IEEE.value == "ieee"
-        assert TemplateType.REPORT.value == "report"
-        assert TemplateType.RESUME.value == "resume"
-
-    def test_enum_from_string(self):
-        """TemplateType should be constructable from string value."""
-        assert TemplateType("ieee") == TemplateType.IEEE
-        assert TemplateType("report") == TemplateType.REPORT
+# ---------------------------------------------------------------------------
+# test_render_report_template
+# ---------------------------------------------------------------------------
 
 
-class TestTemplateInfo:
-    """Tests for the TemplateInfo dataclass."""
+class TestRenderReportTemplate:
+    """DocumentRenderer with 'report' template — success path."""
 
-    def test_defaults(self):
-        """TemplateInfo should have sensible defaults."""
-        info = TemplateInfo(name="test", description="A test template")
-        assert info.version == "1.0.0"
-        assert info.dependencies == []
+    def test_success_is_true(self, simple_ast, tmp_path):
+        with patch("subprocess.run", side_effect=_make_subprocess_mock()):
+            renderer = DocumentRenderer("report")
+            result = renderer.render(simple_ast, tmp_path)
+        assert result.success is True
 
-    def test_custom_values(self):
-        """TemplateInfo should store custom values."""
-        info = TemplateInfo(
-            name="custom",
-            description="Custom template",
-            version="2.0.0",
-            author="Me",
-            dependencies=["geometry", "fancyhdr"],
-        )
-        assert info.author == "Me"
-        assert "geometry" in info.dependencies
+    def test_template_used_is_report(self, simple_ast, tmp_path):
+        with patch("subprocess.run", side_effect=_make_subprocess_mock()):
+            renderer = DocumentRenderer("report")
+            result = renderer.render(simple_ast, tmp_path)
+        assert result.template_used == "report"
+
+    def test_tex_path_is_set_and_has_correct_suffix(self, simple_ast, tmp_path):
+        with patch("subprocess.run", side_effect=_make_subprocess_mock()):
+            renderer = DocumentRenderer("report")
+            result = renderer.render(simple_ast, tmp_path)
+        assert result.tex_path is not None
+        assert Path(result.tex_path).suffix == ".tex"
+
+    def test_pdf_path_is_set_and_has_correct_suffix(self, simple_ast, tmp_path):
+        with patch("subprocess.run", side_effect=_make_subprocess_mock()):
+            renderer = DocumentRenderer("report")
+            result = renderer.render(simple_ast, tmp_path)
+        assert result.pdf_path is not None
+        assert Path(result.pdf_path).suffix == ".pdf"
+
+    def test_processing_time_is_non_negative(self, simple_ast, tmp_path):
+        with patch("subprocess.run", side_effect=_make_subprocess_mock()):
+            renderer = DocumentRenderer("report")
+            result = renderer.render(simple_ast, tmp_path)
+        assert result.processing_time_seconds >= 0.0
+
+    def test_error_field_is_none_on_success(self, simple_ast, tmp_path):
+        with patch("subprocess.run", side_effect=_make_subprocess_mock()):
+            renderer = DocumentRenderer("report")
+            result = renderer.render(simple_ast, tmp_path)
+        assert result.error is None
+
+
+# ---------------------------------------------------------------------------
+# test_render_ieee_template
+# ---------------------------------------------------------------------------
+
+
+class TestRenderIeeeTemplate:
+    """DocumentRenderer with 'ieee' template — success path."""
+
+    def test_success_is_true(self, simple_ast, tmp_path):
+        with patch("subprocess.run", side_effect=_make_subprocess_mock()):
+            renderer = DocumentRenderer("ieee")
+            result = renderer.render(simple_ast, tmp_path)
+        assert result.success is True
+
+    def test_template_used_is_ieee(self, simple_ast, tmp_path):
+        with patch("subprocess.run", side_effect=_make_subprocess_mock()):
+            renderer = DocumentRenderer("ieee")
+            result = renderer.render(simple_ast, tmp_path)
+        assert result.template_used == "ieee"
+
+    def test_unknown_template_raises_value_error(self):
+        with patch("subprocess.run", side_effect=_make_subprocess_mock()):
+            with pytest.raises(ValueError, match="Unknown template"):
+                DocumentRenderer("nonexistent_template")
+
+    def test_all_three_valid_templates_accepted(self):
+        for tpl in ("report", "ieee", "resume"):
+            with patch("subprocess.run", side_effect=_make_subprocess_mock()):
+                renderer = DocumentRenderer(tpl)
+                assert renderer.template == tpl
+
+
+# ---------------------------------------------------------------------------
+# test_render_resume_template
+# ---------------------------------------------------------------------------
+
+
+class TestRenderResumeTemplate:
+    """DocumentRenderer with 'resume' template — success path."""
+
+    def test_success_is_true(self, simple_ast, tmp_path):
+        with patch("subprocess.run", side_effect=_make_subprocess_mock()):
+            renderer = DocumentRenderer("resume")
+            result = renderer.render(simple_ast, tmp_path)
+        assert result.success is True
+
+    def test_template_used_is_resume(self, simple_ast, tmp_path):
+        with patch("subprocess.run", side_effect=_make_subprocess_mock()):
+            renderer = DocumentRenderer("resume")
+            result = renderer.render(simple_ast, tmp_path)
+        assert result.template_used == "resume"
+
+    def test_output_dir_is_created(self, simple_ast, tmp_path):
+        out_dir = tmp_path / "output" / "nested"
+        with patch("subprocess.run", side_effect=_make_subprocess_mock()):
+            renderer = DocumentRenderer("resume")
+            result = renderer.render(simple_ast, out_dir)
+        assert result.success is True
+        assert out_dir.exists()
+
+
+# ---------------------------------------------------------------------------
+# test_latex_error_parsed_correctly
+# ---------------------------------------------------------------------------
+
+
+class TestLatexErrorParsedCorrectly:
+    """xelatex failure → error is parsed from .log and surfaced."""
+
+    def test_success_is_false_on_xelatex_failure(self, simple_ast, tmp_path):
+        with patch("subprocess.run", side_effect=_make_subprocess_mock(xelatex_fail=True)):
+            renderer = DocumentRenderer("report")
+            result = renderer.render(simple_ast, tmp_path)
+        assert result.success is False
+
+    def test_error_field_is_populated(self, simple_ast, tmp_path):
+        with patch("subprocess.run", side_effect=_make_subprocess_mock(xelatex_fail=True)):
+            renderer = DocumentRenderer("report")
+            result = renderer.render(simple_ast, tmp_path)
+        assert result.error is not None
+        assert len(result.error) > 0
+
+    def test_log_bang_lines_appear_in_error(self, simple_ast, tmp_path):
+        log = "! Undefined control sequence.\n! Emergency stop.\n"
+        with patch(
+            "subprocess.run",
+            side_effect=_make_subprocess_mock(xelatex_fail=True, xelatex_log_content=log),
+        ):
+            renderer = DocumentRenderer("report")
+            result = renderer.render(simple_ast, tmp_path)
+        assert "Undefined control sequence" in result.error
+
+    def test_template_used_still_recorded_on_failure(self, simple_ast, tmp_path):
+        with patch("subprocess.run", side_effect=_make_subprocess_mock(xelatex_fail=True)):
+            renderer = DocumentRenderer("report")
+            result = renderer.render(simple_ast, tmp_path)
+        assert result.template_used == "report"
+
+
+# ---------------------------------------------------------------------------
+# test_cleanup_on_failure
+# ---------------------------------------------------------------------------
+
+
+class TestCleanupOnFailure:
+    """_cleanup is always called in finally — even when rendering fails."""
+
+    def test_cleanup_called_on_xelatex_failure(self, simple_ast, tmp_path):
+        with patch("subprocess.run", side_effect=_make_subprocess_mock(xelatex_fail=True)):
+            renderer = DocumentRenderer("report")
+            with patch.object(renderer, "_cleanup") as mock_cleanup:
+                result = renderer.render(simple_ast, tmp_path)
+        assert result.success is False
+        assert mock_cleanup.call_count >= 1
+
+    def test_cleanup_called_on_pandoc_failure(self, simple_ast, tmp_path):
+        with patch("subprocess.run", side_effect=_make_subprocess_mock(pandoc_fail=True)):
+            renderer = DocumentRenderer("report")
+            with patch.object(renderer, "_cleanup") as mock_cleanup:
+                result = renderer.render(simple_ast, tmp_path)
+        assert result.success is False
+        assert mock_cleanup.call_count >= 1
+
+    def test_cleanup_called_on_success_too(self, simple_ast, tmp_path):
+        with patch("subprocess.run", side_effect=_make_subprocess_mock()):
+            renderer = DocumentRenderer("report")
+            with patch.object(renderer, "_cleanup") as mock_cleanup:
+                result = renderer.render(simple_ast, tmp_path)
+        assert result.success is True
+        assert mock_cleanup.call_count >= 1
+
+
+# ---------------------------------------------------------------------------
+# test_pandoc_not_found_error
+# ---------------------------------------------------------------------------
+
+
+class TestPandocNotFoundError:
+    """Missing pandoc binary raises RenderingError at __init__ time."""
+
+    def test_raises_rendering_error(self):
+        with patch("subprocess.run", side_effect=FileNotFoundError("pandoc: not found")):
+            with pytest.raises(RenderingError):
+                DocumentRenderer("report")
+
+    def test_error_message_mentions_pandoc_org(self):
+        with patch("subprocess.run", side_effect=FileNotFoundError):
+            try:
+                DocumentRenderer("report")
+                pytest.fail("Expected RenderingError was not raised")
+            except RenderingError as exc:
+                assert "pandoc.org" in str(exc)
+
+    def test_rendering_error_not_file_not_found_error(self):
+        with patch("subprocess.run", side_effect=FileNotFoundError):
+            exc_caught = None
+            try:
+                DocumentRenderer("report")
+            except RenderingError as exc:
+                exc_caught = exc
+        assert exc_caught is not None
+        assert isinstance(exc_caught, RenderingError)
+
+
+# ---------------------------------------------------------------------------
+# Unit tests for _ast_to_pandoc_json
+# ---------------------------------------------------------------------------
+
+
+class TestAstToPandocJson:
+    """Direct unit tests for the Pandoc JSON conversion helper."""
+
+    def test_output_has_required_top_level_keys(self, simple_ast):
+        with patch("subprocess.run", side_effect=_make_subprocess_mock()):
+            renderer = DocumentRenderer("report")
+        pj = renderer._ast_to_pandoc_json(simple_ast)
+        assert "pandoc-api-version" in pj
+        assert "meta" in pj
+        assert "blocks" in pj
+
+    def test_blocks_are_non_empty_for_non_trivial_ast(self, simple_ast):
+        with patch("subprocess.run", side_effect=_make_subprocess_mock()):
+            renderer = DocumentRenderer("report")
+        pj = renderer._ast_to_pandoc_json(simple_ast)
+        assert len(pj["blocks"]) > 0
+
+    def test_header_block_present_for_section(self, simple_ast):
+        with patch("subprocess.run", side_effect=_make_subprocess_mock()):
+            renderer = DocumentRenderer("report")
+        pj = renderer._ast_to_pandoc_json(simple_ast)
+        types = [b["t"] for b in pj["blocks"]]
+        assert "Header" in types
+
+    def test_title_in_meta(self, simple_ast):
+        with patch("subprocess.run", side_effect=_make_subprocess_mock()):
+            renderer = DocumentRenderer("report")
+        pj = renderer._ast_to_pandoc_json(simple_ast)
+        assert "title" in pj["meta"]

@@ -1,207 +1,101 @@
--- Resume Template for Professional CVs
--- Modern resume template suitable for job applications
+-- Pandoc Lua custom writer: resume / CV template
+-- article class, compact margins, no section numbers
 
-local template = {
-    name = "Resume Template",
-    description = "Professional resume template for job applications",
-    version = "1.0.0",
-    author = "DocStream Team",
-    dependencies = {"geometry", "hyperref", "xcolor", "fontawesome5", "titlesec"}
-}
-
-function template.render(document)
-    local latex = {}
-    
-    -- Document class and packages
-    table.insert(latex, "\\documentclass[11pt,a4paper,sans]{moderncv}")
-    
-    -- ModernCV theme and color
-    table.insert(latex, "\\moderncvstyle{classic}")
-    table.insert(latex, "\\moderncvcolor{blue}")
-    
-    -- Page geometry
-    table.insert(latex, "\\usepackage[scale=0.75]{geometry}")
-    
-    -- Font packages
-    table.insert(latex, "\\usepackage[utf8]{inputenc}")
-    table.insert(latex, "\\usepackage[T1]{fontenc}")
-    
-    -- Hyperlinks
-    table.insert(latex, "\\usepackage{hyperref}")
-    table.insert(latex, "\\hypersetup{colorlinks=true,urlcolor=blue}")
-    
-    -- Additional packages
-    table.insert(latex, "\\usepackage{xcolor}")
-    table.insert(latex, "\\usepackage{titlesec}")
-    
-    -- Custom commands
-    table.insert(latex, "\\name{" .. (document.metadata.first_name or "") .. "}{" .. (document.metadata.last_name or "") .. "}")
-    
-    if document.metadata.address then
-        table.insert(latex, "\\address{" .. escape_latex(document.metadata.address) .. "}")
-    end
-    
-    if document.metadata.phone then
-        table.insert(latex, "\\phone{" .. escape_latex(document.metadata.phone) .. "}")
-    end
-    
-    if document.metadata.email then
-        table.insert(latex, "\\email{" .. escape_latex(document.metadata.email) .. "}")
-    end
-    
-    if document.metadata.website then
-        table.insert(latex, "\\homepage{" .. escape_latex(document.metadata.website) .. "}")
-    end
-    
-    if document.metadata.linkedin then
-        table.insert(latex, "\\social[linkedin]{" .. escape_latex(document.metadata.linkedin) .. "}")
-    end
-    
-    if document.metadata.github then
-        table.insert(latex, "\\social[github]{" .. escape_latex(document.metadata.github) .. "}")
-    end
-    
-    table.insert(latex, "\\begin{document}")
-    table.insert(latex, "\\makecvtitle")
-    
-    -- Main content
-    for _, section in ipairs(document.sections) do
-        table.insert(latex, render_section(section))
-    end
-    
-    table.insert(latex, "\\end{document}")
-    
-    return table.concat(latex, "\n")
-end
-
-function template.render_section(section)
-    local content = {}
-    
-    -- Section heading
-    local section_title = escape_latex(section.title)
-    table.insert(content, "\\section{" .. section_title .. "}")
-    
-    -- Section content
-    for _, block in ipairs(section.blocks) do
-        table.insert(content, render_block(block))
-    end
-    
-    return table.concat(content, "\n")
-end
-
-function template.render_block(block)
-    if block.type == "text" then
-        return escape_latex(block.content) .. "\n\n"
-    elseif block.type == "experience" then
-        return render_experience(block)
-    elseif block.type == "education" then
-        return render_education(block)
-    elseif block.type == "skills" then
-        return render_skills(block)
-    elseif block.type == "list" then
-        return render_list(block)
-    elseif block.type == "heading" then
-        return "\\textbf{" .. escape_latex(block.content) .. "}\n\n"
-    else
-        return escape_latex(block.content) .. "\n\n"
-    end
-end
-
-function template.render_experience(block)
-    local content = {}
-    
-    -- Company and position
-    local company = block.company or ""
-    local position = block.position or ""
-    local location = block.location or ""
-    local start_date = block.start_date or ""
-    local end_date = block.end_date or ""
-    
-    table.insert(content, "\\cventry{" .. escape_latex(start_date .. " -- " .. end_date) .. "}{" .. escape_latex(position) .. "}{" .. escape_latex(company) .. "}{" .. escape_latex(location) .. "}{}{}")
-    
-    -- Description/achievements
-    if block.description then
-        table.insert(content, escape_latex(block.description))
-    end
-    
-    -- Bullet points for achievements
-    if block.achievements and #block.achievements > 0 then
-        for _, achievement in ipairs(block.achievements) do
-            table.insert(content, "\\item " .. escape_latex(achievement))
-        end
-    end
-    
-    return table.concat(content, "\n") .. "\n\n"
-end
-
-function template.render_education(block)
-    local content = {}
-    
-    local institution = block.institution or ""
-    local degree = block.degree or ""
-    local location = block.location or ""
-    local start_date = block.start_date or ""
-    local end_date = block.end_date or ""
-    local gpa = block.gpa or ""
-    
-    table.insert(content, "\\cventry{" .. escape_latex(start_date .. " -- " .. end_date) .. "}{" .. escape_latex(degree) .. "}{" .. escape_latex(institution) .. "}{" .. escape_latex(location) .. "}{" .. escape_latex(gpa) .. "}{}")
-    
-    if block.details then
-        table.insert(content, escape_latex(block.details))
-    end
-    
-    return table.concat(content, "\n") .. "\n\n"
-end
-
-function template.render_skills(block)
-    local content = {}
-    
-    if block.skill_categories then
-        for category, skills in pairs(block.skill_categories) do
-            table.insert(content, "\\textbf{" .. escape_latex(category) .. "}: " .. escape_latex(table.concat(skills, ", ")) .. "\\\\")
-        end
-    elseif block.skills then
-        table.insert(content, escape_latex(table.concat(block.skills, ", ")))
-    end
-    
-    return table.concat(content, "\n") .. "\n\n"
-end
-
-function template.render_list(block)
-    local content = {}
-    
-    table.insert(content, "\\begin{itemize}")
-    
-    for _, item in ipairs(block.items or {}) do
-        table.insert(content, "\\item " .. escape_latex(item))
-    end
-    
-    table.insert(content, "\\end{itemize}")
-    
-    return table.concat(content, "\n") .. "\n\n"
-end
-
-function template.escape_latex(text)
+local function escape(text)
     if not text then return "" end
-    
-    local latex_special_chars = {
-        ["&"] = "\\&",
-        ["%"] = "\\%",
-        ["$"] = "\\$",
-        ["#"] = "\\#",
-        ["_"] = "\\_",
-        ["{"] = "\\{",
-        ["}"] = "\\}",
-        ["~"] = "\\textasciitilde{}",
-        ["^"] = "\\^{}",
-        ["\\"] = "\\textbackslash{}",
-    }
-    
-    for char, escaped in pairs(latex_special_chars) do
-        text = string.gsub(text, char, escaped)
-    end
-    
+    text = text:gsub("\\", "\\textbackslash{}")
+    text = text:gsub("%%", "\\%%")
+    text = text:gsub("%$", "\\$")
+    text = text:gsub("&",  "\\&")
+    text = text:gsub("#",  "\\#")
+    text = text:gsub("_",  "\\_")
+    text = text:gsub("{",  "\\{")
+    text = text:gsub("}",  "\\}")
+    text = text:gsub("~",  "\\textasciitilde{}")
+    text = text:gsub("%^", "\\^{}")
     return text
 end
 
-return template
+local function write_inlines(inlines)
+    local parts = {}
+    for _, il in ipairs(inlines) do
+        if     il.t == "Str"       then table.insert(parts, escape(il.c))
+        elseif il.t == "Space"     then table.insert(parts, " ")
+        elseif il.t == "SoftBreak" then table.insert(parts, " ")
+        elseif il.t == "LineBreak" then table.insert(parts, "\\\\\n")
+        elseif il.t == "Strong"    then table.insert(parts, "\\textbf{" .. write_inlines(il.c) .. "}")
+        elseif il.t == "Emph"      then table.insert(parts, "\\emph{"   .. write_inlines(il.c) .. "}")
+        elseif il.t == "Code"      then table.insert(parts, "\\texttt{" .. escape(il.c[2])    .. "}")
+        elseif type(il.c) == "string" then table.insert(parts, escape(il.c))
+        end
+    end
+    return table.concat(parts)
+end
+
+local function write_block(block)
+    if block.t == "Header" then
+        local lvl  = block.c[1]
+        local text = write_inlines(block.c[3])
+        -- No section numbers for resume
+        if     lvl == 1 then return "\\section*{"    .. text .. "}\n\\hrule\\vspace{2pt}\n"
+        elseif lvl == 2 then return "\\subsection*{" .. text .. "}\n"
+        else                  return "\\subsubsection*{" .. text .. "}\n"
+        end
+    elseif block.t == "Para" then
+        return write_inlines(block.c) .. "\n\n"
+    elseif block.t == "Plain" then
+        return write_inlines(block.c) .. "\n"
+    elseif block.t == "BlockQuote" then
+        local inner = {}
+        for _, b in ipairs(block.c) do table.insert(inner, write_block(b)) end
+        return table.concat(inner)
+    elseif block.t == "CodeBlock" then
+        return "\\begin{verbatim}\n" .. block.c[2] .. "\n\\end{verbatim}\n\n"
+    elseif block.t == "BulletList" then
+        local items = {"\\begin{itemize}\\setlength{\\itemsep}{0pt}"}
+        for _, item in ipairs(block.c) do
+            local blocks = {}
+            for _, b in ipairs(item) do table.insert(blocks, write_block(b)) end
+            table.insert(items, "\\item " .. table.concat(blocks))
+        end
+        table.insert(items, "\\end{itemize}\n")
+        return table.concat(items, "\n")
+    elseif block.t == "HorizontalRule" then
+        return "\\hrule\n\n"
+    else
+        return ""
+    end
+end
+
+function Writer(doc, opts)
+    local out  = {}
+    local meta = doc.meta
+
+    table.insert(out, "\\documentclass[10pt,a4paper]{article}")
+    table.insert(out, "\\usepackage[top=0.6in,bottom=0.6in,left=0.75in,right=0.75in]{geometry}")
+    table.insert(out, "\\usepackage[T1]{fontenc}")
+    table.insert(out, "\\usepackage{lmodern}")
+    table.insert(out, "\\usepackage{enumitem}")
+    table.insert(out, "\\usepackage{hyperref}")
+    table.insert(out, "\\usepackage{microtype}")
+    table.insert(out, "\\setlength{\\parindent}{0pt}")
+    table.insert(out, "\\pagestyle{empty}")
+
+    local title  = meta.title  and pandoc.utils.stringify(meta.title)  or ""
+    local author = meta.author and pandoc.utils.stringify(meta.author) or ""
+
+    table.insert(out, "\\begin{document}")
+
+    if author ~= "" then
+        table.insert(out, "{\\Large\\bfseries " .. escape(author) .. "}\\\\[4pt]")
+    elseif title ~= "" then
+        table.insert(out, "{\\Large\\bfseries " .. escape(title)  .. "}\\\\[4pt]")
+    end
+
+    for _, block in ipairs(doc.blocks) do
+        table.insert(out, write_block(block))
+    end
+
+    table.insert(out, "\\end{document}")
+    return table.concat(out, "\n")
+end
