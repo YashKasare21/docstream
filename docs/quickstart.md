@@ -1,159 +1,208 @@
-# Quick Start Guide
+# Quick Start
 
-This guide will help you get started with DocStream in just a few minutes.
+Get DocStream running in under 5 minutes.
 
-## Installation
+---
 
-Install DocStream using uv (recommended):
-
-```bash
-uv add docstream
-```
-
-Or using pip:
+## Install
 
 ```bash
 pip install docstream
 ```
 
-## Environment Setup
-
-DocStream requires API keys for AI services. Create a `.env` file:
+Or with uv (recommended):
 
 ```bash
-cp .env.example .env
+uv add docstream
 ```
 
-Edit `.env` and add your API keys:
+**System dependencies** (required for PDF rendering):
+
+=== "Ubuntu / Debian"
+    ```bash
+    sudo apt install pandoc texlive-xetex texlive-fonts-recommended \
+                     texlive-latex-extra tesseract-ocr
+    ```
+
+=== "macOS"
+    ```bash
+    brew install pandoc tesseract
+    brew install --cask mactex
+    ```
+
+=== "Docker"
+    ```bash
+    # All system deps pre-installed
+    docker pull ghcr.io/yashkasare21/docstream:latest
+    ```
+
+---
+
+## Set Up API Keys
+
+DocStream uses Gemini 1.5 Flash for document structuring, with Groq as a fallback.
+
+1. Get a free Gemini key at [aistudio.google.com](https://aistudio.google.com/)
+2. Optionally get a Groq key at [console.groq.com](https://console.groq.com/) (fallback)
+
+Create a `.env` file in your project root:
 
 ```env
-GEMINI_API_KEY=your_gemini_api_key_here
-GROQ_API_KEY=your_groq_api_key_here
+GEMINI_API_KEY=your-gemini-api-key-here
+GROQ_API_KEY=your-groq-api-key-here   # optional
 ```
 
-## Basic Usage
+DocStream loads these automatically — no extra setup needed.
 
-### PDF to LaTeX Conversion
+---
 
-```python
-from docstream import DocStream
+## Convert Your First PDF
 
-# Initialize DocStream
-ds = DocStream()
+### CLI
 
-# Convert PDF to LaTeX
-result = ds.pdf_to_latex("input.pdf")
-
-# Access the generated LaTeX
-latex_content = result.latex_content
-print(latex_content)
-
-# Save to file
-result.save("output.tex")
+```bash
+docstream convert paper.pdf --template report --output ./out
 ```
 
-### LaTeX to PDF Conversion
+Expected output:
 
-```python
-# Convert LaTeX to PDF
-result = ds.latex_to_pdf("input.tex")
-
-# Save the PDF
-result.save("output.pdf")
-
-# Or access the PDF bytes directly
-pdf_bytes = result.pdf_content
+```
+✓ Extracted 42 blocks from paper.pdf
+✓ Structured document with Gemini Flash (1.8s)
+✓ Rendered with template: report
+──────────────────────────────────────────
+  LaTeX  ./out/paper.tex
+  PDF    ./out/paper.pdf
+  Time   4.2s
 ```
 
-### Using Custom Templates
+### Python API
 
 ```python
-from docstream import DocStream, TemplateType
+import docstream
 
-# Initialize with a specific template
-ds = DocStream()
+result = docstream.convert("paper.pdf", template="report", output_dir="./out")
 
-# Convert using IEEE template
-result = ds.pdf_to_latex("paper.pdf", template=TemplateType.IEEE)
-
-# Convert using resume template
-result = ds.pdf_to_latex("resume.pdf", template=TemplateType.RESUME)
+print(result.pdf_path)          # ./out/paper.pdf
+print(result.tex_path)          # ./out/paper.tex
+print(result.processing_time_seconds)  # 4.2
+print(result.success)           # True
 ```
 
-## Advanced Usage
+---
 
-### Custom Configuration
+## Switch Templates
+
+Three templates are built in:
+
+| Template | Use case | Document class |
+|----------|----------|----------------|
+| `report` | Technical reports, theses | `article` — serif, 1in margins |
+| `ieee` | Conference papers | `IEEEtran` — two-column, 10pt |
+| `resume` | CVs and résumés | `article` — compact, 0.6in margins |
+
+```bash
+# CLI
+docstream convert paper.pdf --template ieee
+docstream convert cv.pdf    --template resume
+
+# Python
+result = docstream.convert("paper.pdf", template="ieee")
+```
+
+List all available templates:
+
+```bash
+docstream templates list
+```
+
+---
+
+## Use the Python API Step by Step
+
+The `convert()` function is a convenience wrapper. You can also call each stage individually:
+
+### Stage 1 — Extract
 
 ```python
-from docstream import DocStream, DocStreamConfig
+import docstream
 
-# Create custom configuration
-config = DocStreamConfig(
-    gemini_model="gemini-1.5-pro",
-    groq_model="llama3-70b-8192",
-    extraction_timeout=300,
-    rendering_timeout=120
+# Returns List[Block] — each block has content, font_size, is_bold, page_number
+blocks = docstream.extract("paper.pdf")
+
+print(f"Extracted {len(blocks)} blocks")
+for block in blocks[:3]:
+    print(f"  [{block.type}] p{block.page_number}: {block.content[:60]}")
+```
+
+### Stage 2 — Structure
+
+```python
+from docstream.models.document import DocumentAST
+
+# Sends blocks to Gemini Flash → returns a typed DocumentAST
+ast: DocumentAST = docstream.structure(blocks)
+
+print(f"Title: {ast.title}")
+print(f"Authors: {ast.metadata.authors}")
+print(f"Sections: {[s.title for s in ast.sections]}")
+```
+
+You can also pass keys explicitly (they override the `.env` values):
+
+```python
+ast = docstream.structure(
+    blocks,
+    gemini_key="my-gemini-key",
+    groq_key="my-groq-key",
 )
-
-# Initialize with custom config
-ds = DocStream(config=config)
 ```
 
-### Batch Processing
+### Stage 3 — Render
 
 ```python
 from pathlib import Path
 
-# Process multiple files
-pdf_files = Path("pdfs").glob("*.pdf")
-ds = DocStream()
+result = docstream.render(ast, template="ieee", output_dir=Path("./out"))
 
-for pdf_file in pdf_files:
-    try:
-        result = ds.pdf_to_latex(str(pdf_file))
-        output_file = pdf_file.stem + ".tex"
-        result.save(output_file)
-        print(f"Converted {pdf_file} -> {output_file}")
-    except Exception as e:
-        print(f"Error converting {pdf_file}: {e}")
+if result.success:
+    print(f"PDF saved to {result.pdf_path}")
+else:
+    print(f"Render failed: {result.error}")
 ```
 
-### Error Handling
+---
+
+## Error Handling
+
+All DocStream errors inherit from `DocstreamError`:
 
 ```python
-from docstream import DocStream, DocstreamError
-
-ds = DocStream()
+from docstream.exceptions import (
+    DocstreamError,
+    ExtractionError,
+    StructuringError,
+    RenderingError,
+)
 
 try:
-    result = ds.pdf_to_latex("document.pdf")
+    result = docstream.convert("paper.pdf")
 except ExtractionError as e:
-    print(f"Extraction failed: {e}")
+    print(f"Could not read PDF: {e}")
 except StructuringError as e:
-    print(f"Structuring failed: {e}")
+    print(f"AI structuring failed: {e}")
 except RenderingError as e:
-    print(f"Rendering failed: {e}")
+    print(f"LaTeX compilation failed: {e}")
 except DocstreamError as e:
-    print(f"General error: {e}")
+    print(f"Unexpected error: {e}")
 ```
+
+---
 
 ## Next Steps
 
-- Read the [Architecture Overview](architecture.md) to understand how DocStream works
-- Explore the [Template System](templates.md) for custom document types
-- Check the [API Reference](api-reference.md) for detailed documentation
-- Learn how to [Contribute](contributing.md) to the project
-
-## Troubleshooting
-
-### Common Issues
-
-1. **API Key Errors**: Make sure your `.env` file contains valid API keys
-2. **Memory Issues**: Reduce batch size for large documents
-3. **Conversion Failures**: Check document format compatibility
-
-### Getting Help
-
-- Check the [GitHub Issues](https://github.com/yourusername/docstream/issues) for common problems
-- Join our [Discussions](https://github.com/yourusername/docstream/discussions) for community support
-- Review the [Contributing Guide](contributing.md) for development setup
+- **[Architecture](architecture.md)** — understand the 3-stage pipeline in depth
+- **[Templates](templates.md)** — customise or create new Lua templates
+- **[Self-Hosting](self-hosting.md)** — run DocStream in Docker
+- **[API Reference](api-reference.md)** — full function signatures and types
+- **[Contributing](contributing.md)** — add features, fix bugs, write templates

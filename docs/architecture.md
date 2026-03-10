@@ -1,250 +1,214 @@
-# Architecture Overview
+# Architecture
 
-DocStream is built on a modular, three-stage pipeline architecture that ensures clean separation of concerns and maximum flexibility.
+DocStream implements a strict three-stage pipeline — **Extract → Structure → Render** — where each stage has a single responsibility, a typed input/output contract, and is independently testable.
 
-## High-Level Architecture
+---
 
-```
-┌─────────────────┐    ┌─────────────────┐    ┌─────────────────┐
-│   Input Layer   │    │ Processing Core │    │  Output Layer   │
-└─────────────────┘    └─────────────────┘    └─────────────────┘
-         │                       │                       │
-┌─────────────────┐    ┌─────────────────┐    ┌─────────────────┐
-│ PDF/LaTeX Files │───▶│  Extraction     │───▶│  LaTeX/PDF      │
-│                 │    │  Structuring    │    │  Files          │
-│                 │    │  Rendering      │    │                 │
-└─────────────────┘    └─────────────────┘    └─────────────────┘
-```
-
-## Core Pipeline
-
-### 1. Extraction Stage
-
-The extraction stage is responsible for parsing input documents and extracting raw content.
+## Pipeline Overview
 
 ```
-Input Document → Extractor → Raw Content
+  ┌─────────────────────────────────────────────────────────────────────────┐
+  │                         DocStream Pipeline                              │
+  ├──────────────────┬───────────────────────────┬────────────────────────-─┤
+  │   STAGE 1        │   STAGE 2                 │   STAGE 3               │
+  │   EXTRACTION     │   STRUCTURING             │   RENDERING             │
+  │                  │                           │                         │
+  │  PDF file        │  List[Block]              │  DocumentAST            │
+  │     │            │       │                   │       │                 │
+  │     ▼            │       ▼                   │       ▼                 │
+  │  PDFExtractor    │  DocumentStructurer        │  DocumentRenderer      │
+  │  (PyMuPDF)       │  (Gemini Flash)            │  (Pandoc + XeLaTeX)   │
+  │     │            │  (Groq fallback)           │       │                │
+  │     │  font size │       │  JSON → AST        │       │  Lua writer    │
+  │     │  bold/ital │       │  validation        │       │  2-pass LaTeX  │
+  │     │  bbox      │       │                   │       │                 │
+  │     ▼            │       ▼                   │       ▼                 │
+  │  List[Block]     │  DocumentAST              │  .tex + .pdf            │
+  └──────────────────┴───────────────────────────┴─────────────────────────┘
 ```
 
-**Components:**
-- `Extractor`: Main extraction orchestrator
-- PDF parsing using PyMuPDF
-- LaTeX parsing using custom parser
-- OCR support via Tesseract
-
-**Flow:**
-1. Detect document type (PDF/LaTeX)
-2. Choose appropriate parser
-3. Extract text, images, tables, and metadata
-4. Return structured raw content
-
-### 2. Structuring Stage
-
-The structuring stage uses AI models to organize raw content into a structured DocumentAST.
+Data flows through the pipeline as strongly-typed Pydantic models:
 
 ```
-Raw Content → AI Models → DocumentAST
+PDF → [Block, Block, ...] → DocumentAST → ConversionResult(tex_path, pdf_path)
 ```
 
-**Components:**
-- `Structurer`: AI-powered content organization
-- Gemini API for semantic analysis
-- Groq API for fast processing
-- Pydantic models for validation
+---
 
-**Flow:**
-1. Analyze content structure and hierarchy
-2. Identify sections, headings, and relationships
-3. Extract and classify tables and images
-4. Build DocumentAST with proper metadata
+## Stage 1 — Extraction
 
-### 3. Rendering Stage
+**File:** `docstream/core/extractor.py`  
+**Class:** `PDFExtractor`  
+**Input:** PDF file path  
+**Output:** `list[Block]`
 
-The rendering stage converts the DocumentAST into the target format using templates.
+### What it does
+
+`PDFExtractor` opens the PDF with PyMuPDF (`fitz`) and iterates over every page. For each page it calls `page.get_text("dict")` which returns a rich JSON structure containing every text span with:
+
+- font name and size
+- bold / italic flags derived from font name heuristics
+- bounding box coordinates (x0, y0, x1, y1)
+- page number
+
+Spans within the same block are concatenated into a single `Block` object. Blocks shorter than 3 characters are discarded as noise.
+
+### OCR fallback
+
+If the total extracted text for a page is under 100 characters (indicating a scanned/image-only page), the page is rendered to a PIL `Image` at 300 DPI and passed to `pytesseract.image_to_string()`. The OCR result is returned as a plain-text Block.
+
+### Table detection
+
+PyMuPDF's `page.find_tables()` is called on every page. Each detected table is converted to a Markdown string (header row + `---` separator + data rows) and stored as a `BlockType.TABLE` block.
+
+---
+
+## Stage 2 — Structuring
+
+**File:** `docstream/core/structurer.py`  
+**Class:** `DocumentStructurer`  
+**Input:** `list[Block]`  
+**Output:** `DocumentAST`
+
+### What it does
+
+The structurer serialises the blocks to JSON and sends them to an AI model with a system prompt asking for a structured document hierarchy (title, sections, subsections, metadata). The model responds with a JSON object that is validated against the `DocumentAST` Pydantic schema.
+
+### Provider chain
 
 ```
-DocumentAST → Templates → Output Document
+Attempt 1 → Gemini 1.5 Flash   (fast, cheap, 1M context window)
+    ↓ fails
+Attempt 2 → Gemini 1.5 Flash   (retry with backoff)
+    ↓ fails
+Attempt 3 → Groq Llama-3 70B   (fast inference, good fallback)
+    ↓ fails
+Attempt 4 → Groq Llama-3 70B   (retry with backoff)
+    ↓ fails
+raises StructuringError
 ```
 
-**Components:**
-- `Renderer`: Template-based output generation
-- Lua templates for LaTeX generation
-- PDF compilation via LaTeX engines
-- Custom template support
+Retry delay: 2 seconds between attempts within the same provider.
 
-**Flow:**
-1. Select appropriate template
-2. Process DocumentAST through template
-3. Generate target format (LaTeX/PDF)
-4. Validate and return result
+### Why AI for structuring?
+
+Heuristic-based structuring (comparing font sizes to detect headings) breaks on the enormous variety of PDF formatting. AI models generalise across all fonts, layouts, and document types without any per-document tuning.
+
+---
+
+## Stage 3 — Rendering
+
+**File:** `docstream/core/renderer.py`  
+**Class:** `DocumentRenderer`  
+**Input:** `DocumentAST`, output directory  
+**Output:** `ConversionResult`
+
+### What it does
+
+1. **Pandoc JSON** — `DocumentAST` is serialised to Pandoc's native JSON format (blocks, inlines, metadata).
+2. **Pandoc + Lua writer** — `pandoc -f json -t <template.lua>` converts the JSON to LaTeX. The Lua writer has full control over the LaTeX preamble (document class, packages, margins).
+3. **XeLaTeX compilation** — `xelatex -interaction=nonstopmode` is run twice in a temporary directory. Two passes are required so `\tableofcontents` and cross-references resolve correctly.
+4. **Log parsing** — The `.log` file is scanned for lines starting with `!` (LaTeX errors). The first error is surfaced in `ConversionResult.error`.
+5. **Copy outputs** — `document.tex` and `document.pdf` are copied to the user-specified output directory.
+
+### Why XeLaTeX instead of pdfLaTeX?
+
+XeLaTeX supports Unicode natively and can use system fonts via `fontspec`. This matters for documents containing non-ASCII characters, author names, or specialised mathematical symbols. pdfLaTeX requires explicit encoding declarations that are fragile for AI-generated content.
+
+---
 
 ## Data Models
 
-### DocumentAST Structure
-
-```python
+```
 DocumentAST
+├── title: str
 ├── metadata: DocumentMetadata
+│   ├── title, authors, abstract, keywords
+│   └── date, document_type, language
 ├── sections: List[Section]
+│   ├── title, level (1-6), content: str
+│   └── subsections: List[Section]  (recursive)
 ├── blocks: List[Block]
+│   ├── type: BlockType  (TEXT, HEADING, LIST, TABLE, CODE, IMAGE)
+│   ├── content: str
+│   ├── page_number: int
+│   ├── font_size, is_bold, is_italic
+│   └── bbox: tuple[float, float, float, float]
 ├── tables: List[Table]
 └── images: List[Image]
 ```
 
-### Block Hierarchy
-
-```
-Block (Abstract)
-├── TextBlock
-├── HeadingBlock
-├── CodeBlock
-└── ListBlock
-```
+---
 
 ## Template System
 
-### Template Architecture
+Templates are **Pandoc 3.x Lua custom writers** — standalone `.lua` files that receive the full Pandoc AST and return a LaTeX string.
 
 ```
-Templates/
-├── ieee.lua      ← IEEE academic papers
-├── report.lua    ← Technical reports
-├── resume.lua    ← Resume/CV documents
-└── custom/       ← User-defined templates
+docstream/templates/
+├── report.lua   ← article class, 1-inch margins, lmodern serif
+├── ieee.lua     ← IEEEtran class, two-column, 10pt
+└── resume.lua   ← article class, compact 0.6in margins, no section numbers
 ```
 
-### Template Processing
+Each template defines a `Writer(doc, opts)` function. It processes the Pandoc AST's `doc.blocks` list, dispatching on block type (`Para`, `Header`, `BulletList`, `CodeBlock`, etc.) and emitting the corresponding LaTeX commands.
 
-1. **Template Selection**: Choose based on document type or user preference
-2. **Context Preparation**: Prepare DocumentAST for template engine
-3. **Lua Processing**: Execute Lua template with context
-4. **Output Generation**: Generate final LaTeX/PDF
+### Adding a new template
 
-## Error Handling
+1. Copy `docstream/templates/report.lua` to `docstream/templates/mytheme.lua`
+2. Modify the `Writer()` function and the preamble
+3. Add `"mytheme"` to `_VALID_TEMPLATES` in `docstream/core/renderer.py`
+4. Use it: `docstream convert paper.pdf --template mytheme`
 
-### Exception Hierarchy
+---
+
+## Technology Choices and Rationale
+
+### PyMuPDF over pdfminer.six
+
+| | PyMuPDF | pdfminer.six |
+|---|---|---|
+| Speed | ~10× faster | Slower |
+| Font metadata | Full (size, flags, bbox) | Limited |
+| Table detection | Built-in `find_tables()` | None |
+| Image extraction | Yes | No |
+| Maintenance | Active | Slow |
+
+PyMuPDF's `get_text("dict")` gives per-span font metadata in one call. pdfminer requires building a layout analysis tree and manually walking it to recover the same information.
+
+### Gemini Flash over GPT-4
+
+| | Gemini 1.5 Flash | GPT-4o |
+|---|---|---|
+| Context window | 1,000,000 tokens | 128,000 tokens |
+| Speed | ~2s | ~8s |
+| Cost | $0.075 / 1M tokens | $5 / 1M tokens |
+| Long PDFs | Handles entire document | Requires chunking |
+
+A 300-page academic paper is ~300,000 tokens. GPT-4o cannot handle it in one call; Gemini Flash can. Groq is used as a fallback because it offers sub-second inference for smaller documents.
+
+### Pandoc over jinja2 templating
+
+Pandoc's Lua writer receives the full AST — not raw text. This means the template has access to structured information (is this a heading? what level?) rather than doing regex parsing on a string. It also means the same `.lua` file works for any input format Pandoc supports, not just DocStream.
+
+### Pydantic v2 over dataclasses
+
+Pydantic v2 provides runtime validation, JSON serialisation/deserialisation, and IDE autocompletion in one package. The AI model's JSON response is validated directly against the `DocumentAST` schema — invalid responses raise `ValidationError` immediately rather than causing confusing errors downstream.
+
+---
+
+## Error Flow
 
 ```
-DocstreamError (Base)
-├── ExtractionError
-├── StructuringError
-├── RenderingError
-└── ValidationError
+extract()
+  └── ExtractionError   ← file not found, corrupted PDF, Tesseract failure
+
+structure()
+  └── StructuringError  ← all AI providers failed after retries
+
+render()
+  ├── RenderingError    ← Pandoc not found, Lua writer error
+  └── RenderingError    ← xelatex compilation failed (log message included)
 ```
 
-### Error Recovery
-
-- **Extraction Failures**: Fallback to alternative parsers
-- **AI Model Failures**: Retry with different models
-- **Template Failures**: Use default template
-- **Compilation Failures**: Provide detailed error messages
-
-## Performance Considerations
-
-### Memory Management
-
-- Stream processing for large documents
-- Chunked AI model calls
-- Efficient data structures
-
-### Caching Strategy
-
-- Template compilation cache
-- AI model response cache
-- Document parsing cache
-
-### Parallel Processing
-
-- Concurrent extraction for multiple documents
-- Parallel AI model calls
-- Asynchronous PDF compilation
-
-## Security Considerations
-
-### API Key Management
-
-- Environment variable configuration
-- Secure credential storage
-- Rate limiting and quota management
-
-### Document Privacy
-
-- Local processing where possible
-- Secure AI API communication
-- No document storage in cloud services
-
-## Extensibility
-
-### Custom Extractors
-
-```python
-class CustomExtractor(Extractor):
-    def extract(self, file_path: str) -> RawContent:
-        # Custom extraction logic
-        pass
-```
-
-### Custom Templates
-
-```lua
--- custom_template.lua
-function render(document)
-    -- Custom template logic
-    return latex_content
-end
-```
-
-### Custom Models
-
-```python
-class CustomModel(BaseModel):
-    field: str
-    
-    def validate(self) -> bool:
-        # Custom validation logic
-        pass
-```
-
-## Testing Strategy
-
-### Unit Tests
-
-- Individual component testing
-- Mock external dependencies
-- Edge case coverage
-
-### Integration Tests
-
-- End-to-end pipeline testing
-- Real document processing
-- Error scenario testing
-
-### Performance Tests
-
-- Large document processing
-- Memory usage monitoring
-- Processing time benchmarks
-
-## Development Workflow
-
-### Local Development
-
-1. Set up development environment
-2. Run test suite
-3. Check code quality
-4. Test with sample documents
-
-### Continuous Integration
-
-1. Automated testing on multiple Python versions
-2. Code quality checks (ruff, mypy)
-3. Security scanning
-4. Documentation generation
-
-### Release Process
-
-1. Version bumping
-2. Changelog update
-3. Package building
-4. PyPI publication
-5. GitHub release creation
+All exceptions inherit from `DocstreamError(Exception)` so a single `except DocstreamError` catches everything.

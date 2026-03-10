@@ -7,31 +7,65 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+---
+
+## [0.1.0] - 2024-03-07
+
 ### Added
-- Initial project scaffold with full package structure
-- `DocStream` main class with `pdf_to_latex` and `latex_to_pdf` methods
-- Three-stage pipeline: Extractor → Structurer → Renderer
-- `PDFExtractor` using PyMuPDF for PDF parsing
-- `LaTeXExtractor` for LaTeX source parsing
-- `GeminiStructurer` for AI-powered content structuring via Gemini
-- `GroqStructurer` for AI-powered content structuring via Groq
-- `LuaRenderer` for template-based LaTeX generation
-- `PDFRenderer` for LaTeX → PDF compilation
-- Pydantic models: `DocumentAST`, `Section`, `Block`, `Table`, `Image`, `ConversionResult`
-- Custom exception hierarchy: `DocstreamError`, `ExtractionError`, `StructuringError`, `RenderingError`, `ValidationError`
-- Built-in Lua templates: `ieee`, `report`, `resume`
-- Utility helpers for file validation, LaTeX sanitisation, text chunking
-- Comprehensive test suite with shared pytest fixtures
-- GitHub Actions CI workflow (pytest + ruff + mypy on push/PR)
-- GitHub Actions publish workflow (auto-publish to PyPI on release tag)
-- GitHub issue and PR templates
+
+#### Core Pipeline
+- Three-stage PDF → LaTeX + PDF pipeline: **Extraction → Structuring → Rendering**
+- `PDFExtractor` using PyMuPDF for high-fidelity text extraction with font metadata (size, bold, italic), bounding boxes, and page numbers
+- Scanned PDF fallback: automatic Tesseract OCR when extracted text is below 100 characters per page
+- Table detection via PyMuPDF `find_tables()` with Markdown serialisation
+- `DocumentStructurer` using **Gemini 1.5 Flash** (primary) with **Groq Llama-3** fallback and exponential-backoff retry (2 attempts per provider)
+- `DocumentRenderer` using **Pandoc** JSON pipeline + **XeLaTeX** two-pass compilation for cross-references
+- LaTeX log parsing for actionable error messages on compilation failure
+
+#### Templates
+- `report.lua` — Academic report (article class, 1-inch margins, lmodern serif)
+- `ieee.lua` — IEEE two-column conference format (IEEEtran class)
+- `resume.lua` — Clean résumé (compact margins, no section numbers)
+
+#### Public API (Phase 4)
+- `docstream.extract(path)` → `list[Block]`
+- `docstream.structure(blocks, gemini_key, groq_key)` → `DocumentAST`
+- `docstream.render(ast, template, output_dir)` → `ConversionResult`
+- `docstream.convert(path, template, output_dir)` → `ConversionResult` (full pipeline in one call)
+- Automatic API key loading from `.env` via `python-dotenv`
+- Accept `str` or `Path` for all file path arguments
+
+#### CLI
+- `docstream convert <pdf> --template <name> --output <dir>`
+- `docstream extract <pdf> --output <json>`
+- `docstream templates list`
+- `docstream --version`
+- Threading-based progress spinner on stderr
+- Exit code 0 on success, 1 on error
+
+#### Data Models (Pydantic v2)
+- `DocumentAST`, `DocumentMetadata`, `Section`, `Block`, `Table`, `Image`
+- `ConversionResult` with `tex_path`, `pdf_path`, `template_used`, `processing_time_seconds`, `error`
+- `BlockType`, `ListType` enums
+
+#### Exceptions
+- Full hierarchy: `DocstreamError` → `ExtractionError`, `StructuringError`, `RenderingError`, `ValidationError`, `APIError`, `TemplateError`, `CompilationError`, `FileError`, `TimeoutError`, `ModelError`
+
+#### Docker
+- `docker/Dockerfile.dev` — development image with all system tools
+- `docker/Dockerfile.prod` — multi-stage production image, non-root user
+- `docker-compose.yml` — api, worker, redis:7, postgres:16 with healthchecks
+- `.dockerignore` — excludes `.git`, `.venv`, `__pycache__`, `tests/`, `docs/`
+- `make docker-build`, `make docker-run`, `make docker-test`
+
+#### Developer Experience
+- `Makefile` with `install`, `test`, `lint`, `format`, `typecheck`, `check`, `docs`, `clean`, `docker-*` targets
+- GitHub Actions CI (pytest + ruff + mypy on push/PR to `main` and `dev`)
+- GitHub Actions PyPI publish workflow (triggered by release tag)
+- 118 pytest tests across 5 test files
 - MkDocs Material documentation site
-- `Makefile` with `install`, `test`, `lint`, `format`, `typecheck`, `check`, `docs`, `clean` targets
-- MIT License
 
-## [0.1.0] - Unreleased
+---
 
-_Initial development release — not yet published to PyPI._
-
-[Unreleased]: https://github.com/yourusername/docstream/compare/HEAD...HEAD
-[0.1.0]: https://github.com/yourusername/docstream/releases/tag/v0.1.0
+[Unreleased]: https://github.com/YashKasare21/docstream/compare/v0.1.0...HEAD
+[0.1.0]: https://github.com/YashKasare21/docstream/releases/tag/v0.1.0
