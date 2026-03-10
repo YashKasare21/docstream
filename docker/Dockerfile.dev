@@ -12,6 +12,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
         texlive-xetex \
         texlive-fonts-recommended \
         texlive-latex-extra \
+        texlive-publishers \
         tesseract-ocr \
         curl \
         git \

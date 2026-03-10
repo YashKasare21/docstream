@@ -2,7 +2,7 @@
 AI-powered content structuring for document organization.
 
 The DocumentStructurer class takes List[Block] from the extractor and uses
-Gemini 1.5 Flash (primary) or Groq llama-3.1-70b (fallback) to produce a
+Gemini 2.0 Flash (primary) or Groq llama-3.3-70b (fallback) to produce a
 structured DocumentAST. Keys are loaded from a .env file via python-dotenv.
 """
 
@@ -93,8 +93,8 @@ _MAX_CONTENT_CHARS = 30_000
 class DocumentStructurer:
     """Structure a list of Blocks into a DocumentAST using Gemini / Groq."""
 
-    GEMINI_MODEL = "gemini-1.5-flash"
-    GROQ_MODEL = "llama-3.1-70b-versatile"
+    GEMINI_MODEL = "gemini-2.0-flash"
+    GROQ_MODEL = "llama-3.3-70b-versatile"
     MAX_RETRIES = 2
     _BACKOFF = [1, 2]
 
