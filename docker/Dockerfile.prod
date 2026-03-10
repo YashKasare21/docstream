@@ -1,0 +1,58 @@
+# ── DocStream — production image (multi-stage) ────────────────────────────────
+
+# ── Stage 1: builder — install Python dependencies ───────────────────────────
+FROM python:3.11-slim AS builder
+
+ENV DEBIAN_FRONTEND=noninteractive \
+    PYTHONDONTWRITEBYTECODE=1 \
+    PYTHONUNBUFFERED=1
+
+# Install uv
+COPY --from=ghcr.io/astral-sh/uv:latest /uv /usr/local/bin/uv
+
+WORKDIR /app
+
+# Copy files hatchling needs to build the package
+COPY pyproject.toml uv.lock LICENSE README.md ./
+COPY docstream/ ./docstream/
+
+# Install runtime deps only into .venv
+RUN uv sync --frozen --no-dev
+
+
+# ── Stage 2: runtime — lean production image ─────────────────────────────────
+FROM python:3.11-slim AS runtime
+
+ENV DEBIAN_FRONTEND=noninteractive \
+    PYTHONDONTWRITEBYTECODE=1 \
+    PYTHONUNBUFFERED=1 \
+    PATH="/app/.venv/bin:$PATH"
+
+# System dependencies required at runtime
+RUN apt-get update && apt-get install -y --no-install-recommends \
+        pandoc \
+        texlive-xetex \
+        texlive-fonts-recommended \
+        texlive-latex-extra \
+        tesseract-ocr \
+    && rm -rf /var/lib/apt/lists/*
+
+# Non-root user for security
+RUN groupadd -r docstream \
+    && useradd -r -g docstream -m -d /home/docstream docstream
+
+WORKDIR /app
+
+# Copy virtualenv and package from builder
+COPY --from=builder /app/.venv /app/.venv
+COPY --from=builder /app/docstream /app/docstream
+COPY --from=builder /app/pyproject.toml /app/pyproject.toml
+COPY --from=builder /app/README.md /app/README.md
+
+# Output directory writable by the non-root user
+RUN mkdir -p /app/out && chown -R docstream:docstream /app/out
+
+USER docstream
+
+ENTRYPOINT ["docstream"]
+CMD ["--help"]
