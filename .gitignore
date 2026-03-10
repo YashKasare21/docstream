@@ -138,6 +138,13 @@ outputs/
 *.fls
 *.fdb_latexmk
 
+# Test outputs (generated during manual testing)
+test_outputs/
+test_pdfs/*.pdf
+test_pdfs/*.png
+test_pdfs/real_test_outputs/
+test_pdfs/edge_test_outputs/
+
 # Temporary files
 tmp/
 temp/
