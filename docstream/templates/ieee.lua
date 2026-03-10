@@ -1,174 +1,104 @@
--- IEEE Template for Academic Papers
--- Compatible with IEEE conference and journal formats
+-- Pandoc Lua custom writer: IEEE two-column conference format
+-- IEEEtran class, two-column layout
 
-local template = {
-    name = "IEEE Template",
-    description = "IEEE academic paper template for conferences and journals",
-    version = "1.0.0",
-    author = "DocStream Team",
-    dependencies = {"IEEEconf", "graphicx", "amsmath", "url", "booktabs"}
-}
-
-function template.render(document)
-    local latex = {}
-    
-    -- Document class and packages
-    table.insert(latex, "\\documentclass[conference]{IEEEconf}")
-    table.insert(latex, "\\IEEEoverridecommandlockouts")
-    table.insert(latex, "\\IEEEoverridecommandlockouts")
-    table.insert(latex, "\\IEEEstartofpreamble")
-    
-    -- Required packages
-    table.insert(latex, "\\usepackage{cite}")
-    table.insert(latex, "\\usepackage{amsmath,amssymb,amsfonts}")
-    table.insert(latex, "\\usepackage{algorithmic}")
-    table.insert(latex, "\\usepackage{graphicx}")
-    table.insert(latex, "\\usepackage{textcomp}")
-    table.insert(latex, "\\usepackage{xcolor}")
-    table.insert(latex, "\\usepackage{url}")
-    table.insert(latex, "\\usepackage{booktabs}")
-    
-    -- Document setup
-    table.insert(latex, "\\def\\IEEEbibitemsep{1pt}")
-    table.insert(latex, "\\IEEEoverridecommandlockouts")
-    table.insert(latex, "\\IEEEstartofpreamble")
-    
-    -- Title and authors
-    if document.metadata.title then
-        table.insert(latex, "\\title{" .. escape_latex(document.metadata.title) .. "}")
-    end
-    
-    if document.metadata.author then
-        table.insert(latex, "\\author{\\IEEEauthorblockN{" .. escape_latex(document.metadata.author) .. "}}")
-    end
-    
-    table.insert(latex, "\\IEEEendofpreamble")
-    table.insert(latex, "\\begin{document}")
-    
-    -- Title
-    table.insert(latex, "\\maketitle")
-    
-    -- Abstract
-    if document.metadata.abstract then
-        table.insert(latex, "\\begin{abstract}")
-        table.insert(latex, escape_latex(document.metadata.abstract))
-        table.insert(latex, "\\end{abstract}")
-    end
-    
-    -- Keywords
-    if document.metadata.keywords and #document.metadata.keywords > 0 then
-        table.insert(latex, "\\begin{IEEEkeywords}")
-        table.insert(latex, table.concat(document.metadata.keywords, ", "))
-        table.insert(latex, "\\end{IEEEkeywords}")
-    end
-    
-    -- Main content
-    for _, section in ipairs(document.sections) do
-        table.insert(latex, render_section(section))
-    end
-    
-    -- References
-    table.insert(latex, "\\begin{thebibliography}{99}")
-    table.insert(latex, "\\end{thebibliography}")
-    
-    table.insert(latex, "\\end{document}")
-    
-    return table.concat(latex, "\n")
-end
-
-function template.render_section(section)
-    local content = {}
-    
-    -- Section heading
-    if section.level == 1 then
-        table.insert(content, "\\section{" .. escape_latex(section.title) .. "}")
-    elseif section.level == 2 then
-        table.insert(content, "\\subsection{" .. escape_latex(section.title) .. "}")
-    elseif section.level == 3 then
-        table.insert(content, "\\subsubsection{" .. escape_latex(section.title) .. "}")
-    else
-        table.insert(content, "\\paragraph{" .. escape_latex(section.title) .. "}")
-    end
-    
-    -- Section content
-    for _, block in ipairs(section.blocks) do
-        table.insert(content, render_block(block))
-    end
-    
-    return table.concat(content, "\n")
-end
-
-function template.render_block(block)
-    if block.type == "text" then
-        return escape_latex(block.content) .. "\n\n"
-    elseif block.type == "heading" then
-        if block.level == 4 then
-            return "\\paragraph{" .. escape_latex(block.content) .. "}\n\n"
-        else
-            return escape_latex(block.content) .. "\n\n"
-        end
-    elseif block.type == "list" then
-        return render_list(block)
-    elseif block.type == "code" then
-        return render_code(block)
-    elseif block.type == "quote" then
-        return "\\begin{quote}\n" .. escape_latex(block.content) .. "\n\\end{quote}\n\n"
-    else
-        return escape_latex(block.content) .. "\n\n"
-    end
-end
-
-function template.render_list(block)
-    local content = {}
-    
-    if block.ordered then
-        table.insert(content, "\\begin{enumerate}")
-    else
-        table.insert(content, "\\begin{itemize}")
-    end
-    
-    for _, item in ipairs(block.items or {}) do
-        table.insert(content, "\\item " .. escape_latex(item))
-    end
-    
-    if block.ordered then
-        table.insert(content, "\\end{enumerate}")
-    else
-        table.insert(content, "\\end{itemize}")
-    end
-    
-    return table.concat(content, "\n") .. "\n\n"
-end
-
-function template.render_code(block)
-    local content = {}
-    table.insert(content, "\\begin{verbatim}")
-    table.insert(content, block.content)
-    table.insert(content, "\\end{verbatim}")
-    return table.concat(content, "\n") .. "\n\n"
-end
-
-function template.escape_latex(text)
+local function escape(text)
     if not text then return "" end
-    
-    local latex_special_chars = {
-        ["&"] = "\\&",
-        ["%"] = "\\%",
-        ["$"] = "\\$",
-        ["#"] = "\\#",
-        ["_"] = "\\_",
-        ["{"] = "\\{",
-        ["}"] = "\\}",
-        ["~"] = "\\textasciitilde{}",
-        ["^"] = "\\^{}",
-        ["\\"] = "\\textbackslash{}",
-    }
-    
-    for char, escaped in pairs(latex_special_chars) do
-        text = string.gsub(text, char, escaped)
-    end
-    
+    text = text:gsub("\\", "\\textbackslash{}")
+    text = text:gsub("%%", "\\%%")
+    text = text:gsub("%$", "\\$")
+    text = text:gsub("&",  "\\&")
+    text = text:gsub("#",  "\\#")
+    text = text:gsub("_",  "\\_")
+    text = text:gsub("{",  "\\{")
+    text = text:gsub("}",  "\\}")
+    text = text:gsub("~",  "\\textasciitilde{}")
+    text = text:gsub("%^", "\\^{}")
     return text
 end
 
-return template
+local function write_inlines(inlines)
+    local parts = {}
+    for _, il in ipairs(inlines) do
+        if     il.t == "Str"       then table.insert(parts, escape(il.c))
+        elseif il.t == "Space"     then table.insert(parts, " ")
+        elseif il.t == "SoftBreak" then table.insert(parts, " ")
+        elseif il.t == "LineBreak" then table.insert(parts, "\\\\\n")
+        elseif il.t == "Strong"    then table.insert(parts, "\\textbf{" .. write_inlines(il.c) .. "}")
+        elseif il.t == "Emph"      then table.insert(parts, "\\emph{"   .. write_inlines(il.c) .. "}")
+        elseif il.t == "Code"      then table.insert(parts, "\\texttt{" .. escape(il.c[2])    .. "}")
+        elseif type(il.c) == "string" then table.insert(parts, escape(il.c))
+        end
+    end
+    return table.concat(parts)
+end
+
+local function write_block(block)
+    if block.t == "Header" then
+        local lvl  = block.c[1]
+        local text = write_inlines(block.c[3])
+        if     lvl == 1 then return "\\section{"       .. text .. "}\n"
+        elseif lvl == 2 then return "\\subsection{"    .. text .. "}\n"
+        elseif lvl == 3 then return "\\subsubsection{" .. text .. "}\n"
+        else                  return "\\paragraph{"    .. text .. "}\n"
+        end
+    elseif block.t == "Para" then
+        return write_inlines(block.c) .. "\n\n"
+    elseif block.t == "Plain" then
+        return write_inlines(block.c) .. "\n"
+    elseif block.t == "BlockQuote" then
+        local inner = {}
+        for _, b in ipairs(block.c) do table.insert(inner, write_block(b)) end
+        return "\\begin{quote}\n" .. table.concat(inner) .. "\\end{quote}\n\n"
+    elseif block.t == "CodeBlock" then
+        return "\\begin{verbatim}\n" .. block.c[2] .. "\n\\end{verbatim}\n\n"
+    elseif block.t == "BulletList" then
+        local items = {"\\begin{itemize}"}
+        for _, item in ipairs(block.c) do
+            local blocks = {}
+            for _, b in ipairs(item) do table.insert(blocks, write_block(b)) end
+            table.insert(items, "\\item " .. table.concat(blocks))
+        end
+        table.insert(items, "\\end{itemize}\n")
+        return table.concat(items, "\n")
+    elseif block.t == "HorizontalRule" then
+        return "\\hrule\n\n"
+    else
+        return ""
+    end
+end
+
+function Writer(doc, opts)
+    local out  = {}
+    local meta = doc.meta
+
+    table.insert(out, "\\documentclass[conference,10pt]{IEEEtran}")
+    table.insert(out, "\\usepackage[T1]{fontenc}")
+    table.insert(out, "\\usepackage{cite}")
+    table.insert(out, "\\usepackage{amsmath,amssymb}")
+    table.insert(out, "\\usepackage{graphicx}")
+    table.insert(out, "\\usepackage{booktabs}")
+    table.insert(out, "\\usepackage{microtype}")
+
+    local title  = meta.title  and pandoc.utils.stringify(meta.title)  or ""
+    local author = meta.author and pandoc.utils.stringify(meta.author) or ""
+
+    if title  ~= "" then table.insert(out, "\\title{"  .. escape(title)  .. "}") end
+    if author ~= "" then table.insert(out, "\\author{\\IEEEauthorblockN{" .. escape(author) .. "}}") end
+
+    table.insert(out, "\\begin{document}")
+    if title ~= "" then table.insert(out, "\\maketitle") end
+
+    if meta.abstract then
+        local abs_text = pandoc.utils.stringify(meta.abstract)
+        table.insert(out, "\\begin{abstract}")
+        table.insert(out, escape(abs_text))
+        table.insert(out, "\\end{abstract}")
+    end
+
+    for _, block in ipairs(doc.blocks) do
+        table.insert(out, write_block(block))
+    end
+
+    table.insert(out, "\\end{document}")
+    return table.concat(out, "\n")
+end
