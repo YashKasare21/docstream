@@ -1,46 +1,76 @@
 # DocStream
 
-[![PyPI version](https://img.shields.io/pypi/v/docstream.svg)](https://pypi.org/project/docstream/)
-[![CI](https://github.com/yourusername/docstream/actions/workflows/ci.yml/badge.svg)](https://github.com/yourusername/docstream/actions/workflows/ci.yml)
+[![CI](https://github.com/YashKasare21/docstream/actions/workflows/ci.yml/badge.svg)](https://github.com/YashKasare21/docstream/actions/workflows/ci.yml)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 [![Python 3.11+](https://img.shields.io/badge/python-3.11%2B-blue.svg)](https://www.python.org/downloads/)
 [![Code style: ruff](https://img.shields.io/endpoint?url=https://raw.githubusercontent.com/astral-sh/ruff/main/assets/badge/v2.json)](https://github.com/astral-sh/ruff)
 
-**DocStream** is a professional open-source document conversion library providing seamless bidirectional conversion between PDF and LaTeX formats, powered by AI models (Gemini & Groq) and a Lua template engine.
+**DocStream** is a professional open-source document conversion library that turns any PDF into structured LaTeX + PDF output — powered by AI (Gemini & Groq) and Pandoc Lua templates.
+
+---
+
+## How It Works
+
+DocStream uses a **3-stage pipeline**:
+
+```
+Stage 1 — EXTRACTION        Stage 2 — STRUCTURING       Stage 3 — RENDERING
+─────────────────────       ──────────────────────       ───────────────────────────
+                                                         
+  PDF file                    List[Block]                  DocumentAST
+     │                             │                            │
+     ▼                             ▼                            ▼
+  PDFExtractor               DocumentStructurer          DocumentRenderer
+  (PyMuPDF)                  (Gemini Flash)              (Pandoc + XeLaTeX)
+     │                       (Groq fallback)                    │
+     │  font metadata,            │                             │  Lua writer
+     │  bounding boxes,           │  JSON → AST                │  (report/ieee/resume)
+     │  tables, OCR               │  validation                 │
+     ▼                             ▼                            ▼
+  List[Block]               DocumentAST                  .tex  +  .pdf
+```
+
+**Stage 1 — Extraction** (`PDFExtractor`)
+- Reads each PDF page with PyMuPDF
+- Extracts text blocks with font size, bold/italic flags, bounding boxes, and page numbers
+- Detects scanned PDFs (< 100 chars) and falls back to Tesseract OCR
+- Detects tables with `find_tables()` and converts them to Markdown
+
+**Stage 2 — Structuring** (`DocumentStructurer`)
+- Sends extracted blocks to Gemini 1.5 Flash (primary) or Groq Llama-3 (fallback)
+- Parses the AI JSON response into a validated `DocumentAST`
+- Retries with exponential backoff (2 retries per provider)
+
+**Stage 3 — Rendering** (`DocumentRenderer`)
+- Converts `DocumentAST` to Pandoc JSON format
+- Runs `pandoc -f json -t <template.lua>` to generate LaTeX
+- Compiles with `xelatex -interaction=nonstopmode` (twice for cross-references)
+- Parses `.log` for `!` error lines and surfaces them clearly
 
 ---
 
 ## Architecture
 
 ```
-┌──────────────────────────────────────────────────────────────────────┐
-│                          DocStream Pipeline                          │
-├─────────────────┬────────────────────┬───────────────────────────────┤
-│   EXTRACTION    │    STRUCTURING     │          RENDERING            │
-│                 │                    │                               │
-│  PDF ─────────► │  Raw Content ────► │  DocumentAST ──────────────►  │
-│  LaTeX ────────► │  (text/images/ │  (Gemini / Groq)  │  Lua Template  │ LaTeX / PDF │
-│                 │   tables)          │                               │
-│  [PyMuPDF]      │  [AI Models]       │  [ieee / report / resume.lua] │
-└─────────────────┴────────────────────┴───────────────────────────────┘
-
-Input                                                           Output
-  │                                                               │
-  ├── PDF  ──► PDFExtractor  ──► GeminiStructurer ──► LuaRenderer ──► LaTeX
-  │                              GroqStructurer
-  └── LaTeX ──► LaTeXExtractor ──► Structurer    ──► PDFRenderer  ──► PDF
+docstream/
+├── docstream/
+│   ├── __init__.py           ← Public API: convert(), extract(), structure(), render()
+│   ├── cli.py                ← CLI entry point (argparse)
+│   ├── core/
+│   │   ├── extractor.py      ← PDFExtractor (PyMuPDF + Tesseract OCR fallback)
+│   │   ├── structurer.py     ← DocumentStructurer (Gemini Flash + Groq fallback)
+│   │   └── renderer.py       ← DocumentRenderer (Pandoc + XeLaTeX)
+│   ├── templates/
+│   │   ├── report.lua        ← Pandoc Lua writer: academic report
+│   │   ├── ieee.lua          ← Pandoc Lua writer: IEEE two-column
+│   │   └── resume.lua        ← Pandoc Lua writer: compact resume
+│   ├── models/
+│   │   └── document.py       ← Pydantic models (DocumentAST, Block, ConversionResult…)
+│   └── exceptions.py         ← Exception hierarchy
+├── tests/                    ← pytest suite (64 tests)
+├── pyproject.toml            ← uv-managed, ruff + mypy configured
+└── Makefile                  ← make install / test / lint / docs
 ```
-
----
-
-## Features
-
-- **Bidirectional**: PDF → LaTeX and LaTeX → PDF
-- **AI-powered structuring**: Gemini 1.5 Pro and Groq (Llama 3) for intelligent document understanding
-- **Template engine**: Lua-based templates (IEEE, Report, Resume) with full customisation support
-- **Type-safe**: Pydantic v2 models throughout the entire pipeline
-- **Production-ready error handling**: Granular exception hierarchy with automatic fallback between AI models
-- **Extensible**: Drop in custom extractors, structurers, or Lua templates
 
 ---
 
@@ -54,87 +84,130 @@ uv add docstream
 pip install docstream
 ```
 
-### Environment setup
+### System dependencies
+
+```bash
+# Pandoc (required for LaTeX generation)
+sudo apt install pandoc -y
+
+# XeLaTeX (required for PDF compilation)
+sudo apt install texlive-xetex texlive-latex-extra texlive-fonts-recommended -y
+
+# Tesseract (optional — only needed for scanned PDFs)
+sudo apt install tesseract-ocr -y
+```
+
+### API keys
 
 ```bash
 cp .env.example .env
-# Edit .env and add your API keys:
-#   GEMINI_API_KEY=...
-#   GROQ_API_KEY=...
+# Edit .env:
+#   GEMINI_API_KEY=your-gemini-key
+#   GROQ_API_KEY=your-groq-key   (optional fallback)
 ```
 
 ---
 
-## Quick Start
+## Python API
+
+### One-liner conversion
 
 ```python
-from docstream import DocStream, TemplateType
+from docstream import convert
 
-ds = DocStream()
-
-# PDF → LaTeX
-result = ds.pdf_to_latex("paper.pdf", template=TemplateType.IEEE)
-result.save("paper.tex")
-
-# LaTeX → PDF
-result = ds.latex_to_pdf("report.tex", template=TemplateType.REPORT)
-result.save("report.pdf")
+result = convert("paper.pdf", template="ieee", output_dir="./out")
+print(result.pdf_path)   # ./out/document.pdf
+print(result.tex_path)   # ./out/document.tex
 ```
 
-### With custom configuration
+### Step-by-step pipeline
 
 ```python
-from docstream import DocStream, DocStreamConfig
+from docstream import extract, structure, render
 
-config = DocStreamConfig(
-    gemini_model="gemini-1.5-pro",
-    groq_model="llama3-70b-8192",
-    extraction_timeout=300,
-)
-ds = DocStream(config=config)
-result = ds.pdf_to_latex("thesis.pdf")
+# Stage 1 — extract raw blocks from PDF
+blocks = extract("paper.pdf")
+print(f"Extracted {len(blocks)} blocks")
+
+# Stage 2 — structure blocks into an AST with AI
+ast = structure(blocks)
+print(f"Title: {ast.title}, Sections: {len(ast.sections)}")
+
+# Stage 3 — render AST to LaTeX + PDF
+result = render(ast, template="report", output_dir="./out")
+if result.success:
+    print(f"PDF saved to {result.pdf_path}")
+else:
+    print(f"Rendering failed: {result.error}")
+```
+
+### With explicit API keys
+
+```python
+from docstream import extract, structure
+
+blocks = extract("paper.pdf")
+ast = structure(blocks, gemini_key="your-key", groq_key="your-groq-key")
 ```
 
 ### Error handling
 
 ```python
-from docstream import DocStream
+from docstream import convert
 from docstream.exceptions import ExtractionError, StructuringError, RenderingError
 
-ds = DocStream()
 try:
-    result = ds.pdf_to_latex("document.pdf")
+    result = convert("document.pdf", template="report")
 except ExtractionError as e:
-    print(f"Extraction failed: {e}")
+    print(f"Could not read PDF: {e}")
 except StructuringError as e:
     print(f"AI structuring failed: {e}")
 except RenderingError as e:
-    print(f"Template rendering failed: {e}")
+    print(f"LaTeX compilation failed: {e}")
 ```
+
+### Available templates
+
+| Name     | Description                                  |
+|----------|----------------------------------------------|
+| `report` | Academic report — article class, 1in margins |
+| `ieee`   | IEEE two-column conference format             |
+| `resume` | Clean resume — compact, no section numbers   |
 
 ---
 
-## Project Structure
+## CLI
 
+### Convert a PDF
+
+```bash
+# Full pipeline: PDF → LaTeX + PDF
+docstream convert paper.pdf --template ieee --output ./out
+
+# Short flags
+docstream convert paper.pdf -t report -o ./output
 ```
-docstream/
-├── docstream/
-│   ├── core/
-│   │   ├── extractor.py      ← PDF & LaTeX content extraction
-│   │   ├── structurer.py     ← AI-powered (Gemini / Groq) structuring
-│   │   └── renderer.py       ← Lua template rendering + PDF compilation
-│   ├── templates/
-│   │   ├── ieee.lua          ← IEEE conference/journal template
-│   │   ├── report.lua        ← Technical report template
-│   │   └── resume.lua        ← Professional resume template
-│   ├── models/
-│   │   └── document.py       ← Pydantic models (DocumentAST, Section, Block…)
-│   ├── exceptions.py         ← Custom exception hierarchy
-│   └── utils/helpers.py      ← File validation, LaTeX sanitisation, etc.
-├── tests/                    ← pytest test suite
-├── docs/                     ← MkDocs Material documentation
-├── pyproject.toml            ← uv-managed, ruff + mypy configured
-└── Makefile                  ← make install / test / lint / format / docs
+
+### Extract raw blocks
+
+```bash
+# Print extracted blocks as JSON to stdout
+docstream extract paper.pdf
+
+# Save to file
+docstream extract paper.pdf --output blocks.json
+```
+
+### List templates
+
+```bash
+docstream templates list
+```
+
+### Version
+
+```bash
+docstream --version
 ```
 
 ---
@@ -142,7 +215,7 @@ docstream/
 ## Development
 
 ```bash
-# Install dev dependencies
+# Install all dependencies
 make install
 
 # Run tests
@@ -159,21 +232,16 @@ make typecheck
 
 # All checks at once
 make check
-
-# Serve docs locally
-make docs-serve
 ```
 
 ---
 
 ## Contributing
 
-Contributions are welcome! See [CONTRIBUTING.md](CONTRIBUTING.md) and the full
-[Contributing Guide](docs/contributing.md) for details on setup, code style,
-testing requirements, and the PR process.
+Contributions are welcome! See [CONTRIBUTING.md](CONTRIBUTING.md) for setup, code style, and PR process.
 
 ---
 
 ## License
 
-[MIT](LICENSE) © 2024 Your Name
+[MIT](LICENSE) © 2024 DocStream Contributors

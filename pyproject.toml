@@ -44,6 +44,9 @@ dev = [
     "mkdocs-material>=9.5.0",
 ]
 
+[project.scripts]
+docstream = "docstream.cli:_cli_entry"
+
 [project.urls]
 Homepage = "https://github.com/yourusername/docstream"
 Documentation = "https://docstream.readthedocs.io"
