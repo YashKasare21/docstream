@@ -11,17 +11,25 @@ license = { file = "LICENSE" }
 authors = [
     { name = "Your Name", email = "your.email@example.com" },
 ]
-keywords = ["pdf", "latex", "document", "conversion", "ai"]
+keywords = ["pdf", "latex", "document-conversion", "ocr", "ai", "gemini", "pandoc", "xelatex", "tesseract"]
 classifiers = [
     "Development Status :: 3 - Alpha",
     "Intended Audience :: Developers",
     "Intended Audience :: Science/Research",
+    "Intended Audience :: Education",
     "License :: OSI Approved :: MIT License",
+    "Natural Language :: English",
+    "Operating System :: OS Independent",
     "Programming Language :: Python :: 3",
     "Programming Language :: Python :: 3.11",
     "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3 :: Only",
+    "Topic :: Text Processing",
     "Topic :: Text Processing :: Markup :: LaTeX",
     "Topic :: Scientific/Engineering",
+    "Topic :: Scientific/Engineering :: Artificial Intelligence",
+    "Topic :: Software Development :: Libraries :: Python Modules",
+    "Topic :: Utilities",
     "Typing :: Typed",
 ]
 requires-python = ">=3.11"
@@ -48,11 +56,11 @@ dev = [
 docstream = "docstream.cli:_cli_entry"
 
 [project.urls]
-Homepage = "https://github.com/yourusername/docstream"
-Documentation = "https://docstream.readthedocs.io"
-Repository = "https://github.com/yourusername/docstream"
-"Bug Tracker" = "https://github.com/yourusername/docstream/issues"
-Changelog = "https://github.com/yourusername/docstream/blob/main/CHANGELOG.md"
+Homepage = "https://github.com/YashKasare21/docstream"
+Documentation = "https://github.com/YashKasare21/docstream/blob/main/README.md"
+Repository = "https://github.com/YashKasare21/docstream"
+"Bug Tracker" = "https://github.com/YashKasare21/docstream/issues"
+Changelog = "https://github.com/YashKasare21/docstream/blob/main/CHANGELOG.md"
 
 [dependency-groups]
 dev = [

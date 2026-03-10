@@ -2,8 +2,8 @@ site_name: DocStream
 site_description: Professional document conversion library (PDF ↔ LaTeX)
 site_author: Your Name
 site_url: https://docstream.readthedocs.io
-repo_url: https://github.com/yourusername/docstream
-repo_name: yourusername/docstream
+repo_url: https://github.com/YashKasare21/docstream
+repo_name: YashKasare21/docstream
 
 theme:
   name: material
@@ -41,6 +41,7 @@ nav:
   - Architecture: architecture.md
   - Templates: templates.md
   - API Reference: api-reference.md
+  - Self-Hosting: self-hosting.md
   - Contributing: contributing.md
 
 plugins:
@@ -65,8 +66,8 @@ markdown_extensions:
 extra:
   social:
     - icon: fontawesome/brands/github
-      link: https://github.com/yourusername/docstream
+      link: https://github.com/YashKasare21/docstream
     - icon: fontawesome/brands/python
       link: https://pypi.org/project/docstream/
 
-copyright: Copyright &copy; 2024 Your Name
+copyright: Copyright &copy; 2024 Yash Kasare
