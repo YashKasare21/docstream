@@ -1,4 +1,5 @@
-.PHONY: install test lint format docs docs-serve clean typecheck check
+.PHONY: install test lint format docs docs-serve clean typecheck check \
+        docker-build docker-run docker-test
 
 # Install all dependencies using uv
 install:
@@ -42,3 +43,24 @@ clean:
 	find . -type d -name __pycache__ -exec rm -rf {} +
 	find . -type f -name "*.pyc" -delete
 	find . -type f -name "*.pyo" -delete
+
+# ── Docker targets ────────────────────────────────────────────────────────────
+
+# Build the development Docker image
+docker-build:
+	docker build -f docker/Dockerfile.dev -t docstream:dev .
+
+# Run an interactive dev container with the project mounted
+docker-run:
+	docker run -it --rm \
+		-v $(PWD):/app \
+		-e GEMINI_API_KEY=$(GEMINI_API_KEY) \
+		-e GROQ_API_KEY=$(GROQ_API_KEY) \
+		docstream:dev
+
+# Run the test suite inside the dev container
+docker-test:
+	docker run --rm \
+		-v $(PWD):/app \
+		docstream:dev \
+		uv run pytest -q

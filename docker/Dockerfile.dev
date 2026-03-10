@@ -1,0 +1,35 @@
+# ── DocStream — development image ─────────────────────────────────────────────
+# Includes all system tools + dev dependencies.  Entry point: bash.
+FROM python:3.11-slim
+
+ENV DEBIAN_FRONTEND=noninteractive \
+    PYTHONDONTWRITEBYTECODE=1 \
+    PYTHONUNBUFFERED=1
+
+# System dependencies
+RUN apt-get update && apt-get install -y --no-install-recommends \
+        pandoc \
+        texlive-xetex \
+        texlive-fonts-recommended \
+        texlive-latex-extra \
+        tesseract-ocr \
+        curl \
+        git \
+    && rm -rf /var/lib/apt/lists/*
+
+# Install uv (fast Python package manager)
+COPY --from=ghcr.io/astral-sh/uv:latest /uv /usr/local/bin/uv
+
+WORKDIR /app
+
+# Copy files required by hatchling to build the project
+COPY pyproject.toml uv.lock LICENSE README.md ./
+COPY docstream/ ./docstream/
+
+# Install all dependencies including dev group
+RUN uv sync --frozen
+
+# Copy remaining project files (tests, docs, Makefile, etc.)
+COPY . .
+
+CMD ["bash"]
