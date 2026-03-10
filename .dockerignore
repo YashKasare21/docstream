@@ -29,6 +29,7 @@ site
 
 # Development / documentation
 tests
+test_pdfs
 docs
 
 # Environment files (never bake secrets into images)

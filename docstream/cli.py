@@ -90,6 +90,7 @@ def _cmd_extract(args: argparse.Namespace) -> int:
         payload = [b.model_dump(mode="json") for b in blocks]
         if args.output:
             out_path = Path(args.output)
+            out_path.parent.mkdir(parents=True, exist_ok=True)
             out_path.write_text(json.dumps(payload, indent=2, default=str), encoding="utf-8")
             print(f"\n  Extracted {len(blocks)} block(s) -> {out_path}")
         else:
