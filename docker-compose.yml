@@ -1,0 +1,95 @@
+services:
+
+  # ── API server (placeholder for future web API) ───────────────────────────
+  api:
+    build:
+      context: .
+      dockerfile: docker/Dockerfile.prod
+    image: docstream:latest
+    container_name: docstream-api
+    environment:
+      - GEMINI_API_KEY=${GEMINI_API_KEY:-}
+      - GROQ_API_KEY=${GROQ_API_KEY:-}
+      - DATABASE_URL=postgresql://docstream:docstream@postgres:5432/docstream
+      - REDIS_URL=redis://redis:6379/0
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    volumes:
+      - ./out:/app/out
+    ports:
+      - "8000:8000"
+    healthcheck:
+      test: ["CMD", "docstream", "--version"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 15s
+    restart: unless-stopped
+
+  # ── Background worker (placeholder for async conversion jobs) ─────────────
+  worker:
+    build:
+      context: .
+      dockerfile: docker/Dockerfile.prod
+    image: docstream:latest
+    container_name: docstream-worker
+    environment:
+      - GEMINI_API_KEY=${GEMINI_API_KEY:-}
+      - GROQ_API_KEY=${GROQ_API_KEY:-}
+      - DATABASE_URL=postgresql://docstream:docstream@postgres:5432/docstream
+      - REDIS_URL=redis://redis:6379/0
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    volumes:
+      - ./out:/app/out
+    healthcheck:
+      test: ["CMD", "docstream", "--version"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 15s
+    restart: unless-stopped
+
+  # ── Redis — task queue / cache ─────────────────────────────────────────────
+  redis:
+    image: redis:7-alpine
+    container_name: docstream-redis
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    restart: unless-stopped
+
+  # ── PostgreSQL — persistent storage ───────────────────────────────────────
+  postgres:
+    image: postgres:16-alpine
+    container_name: docstream-postgres
+    environment:
+      POSTGRES_DB: docstream
+      POSTGRES_USER: docstream
+      POSTGRES_PASSWORD: docstream
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U docstream -d docstream"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    restart: unless-stopped
+
+volumes:
+  redis_data:
+  postgres_data:
