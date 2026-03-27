@@ -17,6 +17,7 @@ from docstream.models.document import (
     Image,
     ListBlock,
     ListType,
+    QualityReport,
     RawContent,
     Section,
     SemanticChunk,
@@ -49,4 +50,5 @@ __all__ = [
     "TemplateField",
     "TemplateSchema",
     "TemplateData",
+    "QualityReport",
 ]

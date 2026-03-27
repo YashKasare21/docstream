@@ -508,3 +508,32 @@ class TemplateData(BaseModel):
     missing_required: list[str] = Field(default_factory=list)
     warnings: list[str] = Field(default_factory=list)
     score: float = 0.0
+
+
+# ---------------------------------------------------------------------------
+# v2 quality models
+# ---------------------------------------------------------------------------
+
+
+class QualityReport(BaseModel):
+    """Result of quality-checking a generated LaTeX document.
+
+    Attributes:
+        technical_score:    Compilation / syntax score in [0.0, 1.0].
+        professional_score: Layout / content quality score in [0.0, 1.0].
+        overall_score:      Weighted average (0.6 × technical + 0.4 × professional).
+        passed:             ``True`` if overall_score ≥ 0.6 and no blocking errors.
+        errors:             Blocking issues that must be fixed.
+        warnings:           Non-blocking suggestions for improvement.
+        latex_log:          Raw xelatex log output (for debugging).
+        compiled_successfully: Whether xelatex produced a PDF.
+    """
+
+    technical_score: float = 0.0
+    professional_score: float = 0.0
+    overall_score: float = 0.0
+    passed: bool = False
+    errors: list[str] = Field(default_factory=list)
+    warnings: list[str] = Field(default_factory=list)
+    latex_log: str = ""
+    compiled_successfully: bool = False

@@ -51,6 +51,7 @@ from docstream.models.document import (
     TemplateData,
     TemplateField,
     TemplateSchema,
+    QualityReport,
 )
 
 
@@ -165,6 +166,29 @@ def recommend_templates(
     return TemplateMatcher().recommend_templates(doc)
 
 
+def check_quality(
+    latex_content: str,
+    template: str,
+    skip_compilation: bool = False,
+) -> QualityReport:
+    """Check quality of generated LaTeX content before delivery.
+
+    Runs static analysis (always) and optionally compiles with xelatex
+    to verify it produces a PDF.
+
+    Args:
+        latex_content:    Complete LaTeX document string.
+        template:         Template name used to generate this LaTeX.
+        skip_compilation: If ``True``, skip xelatex (faster, less thorough).
+
+    Returns:
+        ``QualityReport`` with scores, errors, and warnings.
+    """
+    from docstream.core.quality_checker import QualityChecker
+
+    return QualityChecker().check(latex_content, template, skip_compilation)
+
+
 def supported_formats() -> list[str]:
     """Return all supported input file extensions.
 
@@ -267,6 +291,7 @@ __all__ = [
     "__license__",
     # Functional API
     "analyze",
+    "check_quality",
     "convert",
     "extract",
     "match_template",
@@ -301,6 +326,8 @@ __all__ = [
     "TemplateField",
     "TemplateSchema",
     "TemplateData",
+    # v2 quality models
+    "QualityReport",
     # Exceptions
     "AIUnavailableError",
     "DocstreamError",
