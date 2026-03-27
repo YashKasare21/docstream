@@ -11,7 +11,7 @@ import logging
 import os
 from pathlib import Path
 
-__version__ = "0.1.0"
+__version__ = "0.2.0-dev"
 __author__ = "Your Name"
 __email__ = "your.email@example.com"
 __license__ = "MIT"
@@ -63,20 +63,36 @@ def _load_env() -> None:
 
 
 def extract(path: str | Path) -> list[Block]:
-    """Extract raw content blocks from a PDF file.
+    """Extract raw content blocks from any supported document format.
+
+    Supports: PDF, DOCX, PPTX, JPG, PNG, MD, TXT.
 
     Args:
-        path: Path to the input PDF (str or Path).
+        path: Path to the input file (str or Path).
 
     Returns:
         List of Block objects with text, font metadata, bounding boxes, etc.
 
     Raises:
-        ExtractionError: If the file cannot be read or parsed.
+        ExtractionError: If the file cannot be read, parsed, or the
+                         format is not supported.
     """
     _load_env()
-    extractor = PDFExtractor(str(path))
-    return extractor.extract()
+    from docstream.core.format_router import FormatRouter
+
+    router = FormatRouter()
+    return router.extract(Path(path))
+
+
+def supported_formats() -> list[str]:
+    """Return all supported input file extensions.
+
+    Returns:
+        List of extension strings, e.g. ``['.pdf', '.docx', ...]``.
+    """
+    from docstream.core.format_router import FormatRouter
+
+    return FormatRouter.supported_extensions()
 
 
 def structure(
@@ -173,6 +189,7 @@ __all__ = [
     "extract",
     "structure",
     "render",
+    "supported_formats",
     # Core classes
     "DocStream",
     "DocStreamConfig",

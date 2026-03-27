@@ -6,20 +6,20 @@ Handles both digital and scanned PDFs via Tesseract OCR.
 from __future__ import annotations
 
 from pathlib import Path
-from typing import TYPE_CHECKING, List
 
-if TYPE_CHECKING:
-    from docstream import Block
+from docstream.core.extractor import PDFExtractor
+from docstream.models.document import Block
 
 
 class PDFHandler:
     """Extract blocks from PDF files using the existing ``PDFExtractor``.
 
     Handles both digital (text-layer) PDFs and scanned PDFs.
-    Scanned documents are routed through Tesseract OCR automatically.
+    Scanned documents are routed through Tesseract OCR automatically
+    by the underlying ``PDFExtractor``.
     """
 
-    def extract(self, file_path: Path) -> "List[Block]":
+    def extract(self, file_path: Path) -> list[Block]:
         """Extract blocks from a PDF file.
 
         Args:
@@ -29,6 +29,7 @@ class PDFHandler:
             List of ``Block`` objects with text, type, and metadata.
 
         Raises:
-            NotImplementedError: Until this method is implemented.
+            ExtractionError: If the file cannot be read or parsed.
         """
-        raise NotImplementedError
+        extractor = PDFExtractor(file_path)
+        return extractor.extract()
