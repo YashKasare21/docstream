@@ -22,6 +22,9 @@ from docstream.models.document import (
     SemanticChunk,
     SemanticDocument,
     Table,
+    TemplateData,
+    TemplateField,
+    TemplateSchema,
     TextBlock,
 )
 
@@ -43,4 +46,7 @@ __all__ = [
     "ListType",
     "SemanticChunk",
     "SemanticDocument",
+    "TemplateField",
+    "TemplateSchema",
+    "TemplateData",
 ]

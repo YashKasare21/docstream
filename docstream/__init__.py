@@ -48,6 +48,9 @@ from docstream.models.document import (
     SemanticChunk,
     SemanticDocument,
     Table,
+    TemplateData,
+    TemplateField,
+    TemplateSchema,
 )
 
 
@@ -120,6 +123,46 @@ def analyze(
         blocks_or_path = FormatRouter().extract(Path(blocks_or_path))
 
     return SemanticAnalyzer(ai_provider).analyze(blocks_or_path)
+
+
+def match_template(
+    doc: SemanticDocument,
+    template: str,
+) -> TemplateData:
+    """Map a ``SemanticDocument`` to a specific template's fields.
+
+    Args:
+        doc:      ``SemanticDocument`` produced by ``analyze()``.
+        template: Template name — ``"report"``, ``"ieee"``, ``"resume"``,
+                  ``"altacv"``, or ``"moderncv"``.
+
+    Returns:
+        ``TemplateData`` with populated fields, missing_required list,
+        warnings, and a compatibility score.
+
+    Raises:
+        TemplateError: If *template* is not one of the five built-in names.
+    """
+    from docstream.core.template_matcher import TemplateMatcher
+
+    return TemplateMatcher().match(doc, template)
+
+
+def recommend_templates(
+    doc: SemanticDocument,
+) -> list[tuple[str, float]]:
+    """Return all templates ranked by compatibility with *doc* (descending).
+
+    Args:
+        doc: ``SemanticDocument`` produced by ``analyze()``.
+
+    Returns:
+        List of ``(template_name, score)`` tuples, highest score first.
+        Always returns exactly five entries.
+    """
+    from docstream.core.template_matcher import TemplateMatcher
+
+    return TemplateMatcher().recommend_templates(doc)
 
 
 def supported_formats() -> list[str]:
@@ -226,6 +269,8 @@ __all__ = [
     "analyze",
     "convert",
     "extract",
+    "match_template",
+    "recommend_templates",
     "structure",
     "render",
     "supported_formats",
@@ -252,6 +297,10 @@ __all__ = [
     "DocumentType",
     "SemanticChunk",
     "SemanticDocument",
+    # v2 template models
+    "TemplateField",
+    "TemplateSchema",
+    "TemplateData",
     # Exceptions
     "AIUnavailableError",
     "DocstreamError",

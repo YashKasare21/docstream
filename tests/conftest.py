@@ -505,3 +505,108 @@ def corrupt_pdf_path(tmp_path):
     out = tmp_path / "corrupt.pdf"
     out.write_bytes(b"THIS IS NOT A VALID PDF FILE CONTENT XYZ")
     return str(out)
+
+
+# ---------------------------------------------------------------------------
+# v2 SemanticDocument fixtures for template matcher tests
+# ---------------------------------------------------------------------------
+
+
+@pytest.fixture
+def resume_doc():
+    """SemanticDocument representing a typical software-engineer résumé."""
+    from docstream.models.document import DocumentType, SemanticChunk, SemanticDocument
+
+    return SemanticDocument(
+        document_type=DocumentType.RESUME,
+        confidence=0.95,
+        title="Jane Doe",
+        language="en",
+        chunks=[
+            SemanticChunk(
+                chunk_type="contact_info",
+                content="Jane Doe · jane@example.com · +1-555-0100",
+                importance=1.0,
+            ),
+            SemanticChunk(
+                chunk_type="summary",
+                content="Experienced software engineer with 5 years in cloud infrastructure.",
+                importance=0.9,
+            ),
+            SemanticChunk(
+                chunk_type="work_experience",
+                content="Software Engineer, Acme Corp, 2020–2023",
+                importance=0.9,
+                metadata={"company": "Acme Corp"},
+            ),
+            SemanticChunk(
+                chunk_type="work_experience",
+                content="Junior Developer, StartupXYZ, 2018–2020",
+                importance=0.8,
+            ),
+            SemanticChunk(
+                chunk_type="education",
+                content="BSc Computer Science, MIT, 2018",
+                importance=0.8,
+            ),
+            SemanticChunk(
+                chunk_type="skills",
+                content="Python, TypeScript, Kubernetes, Docker, PostgreSQL",
+                importance=0.7,
+            ),
+        ],
+        word_count=150,
+        estimated_pages=1,
+    )
+
+
+@pytest.fixture
+def paper_doc():
+    """SemanticDocument representing a research paper."""
+    from docstream.models.document import DocumentType, SemanticChunk, SemanticDocument
+
+    return SemanticDocument(
+        document_type=DocumentType.RESEARCH_PAPER,
+        confidence=0.92,
+        title="A Study of Neural Scaling Laws",
+        language="en",
+        chunks=[
+            SemanticChunk(
+                chunk_type="abstract",
+                content="We study neural scaling laws in large language models.",
+                importance=1.0,
+            ),
+            SemanticChunk(
+                chunk_type="keywords",
+                content="neural scaling, language models, training efficiency",
+                importance=0.8,
+            ),
+            SemanticChunk(
+                chunk_type="introduction",
+                content="Large language models have shown remarkable emergent capabilities.",
+                importance=0.9,
+            ),
+            SemanticChunk(
+                chunk_type="methodology",
+                content="We trained models at 7B, 13B, 70B, and 405B parameter scales.",
+                importance=0.9,
+            ),
+            SemanticChunk(
+                chunk_type="results",
+                content="We observed consistent power-law scaling across all model sizes.",
+                importance=0.9,
+            ),
+            SemanticChunk(
+                chunk_type="conclusion",
+                content="Scaling laws are predictable, enabling reliable compute budgeting.",
+                importance=0.8,
+            ),
+            SemanticChunk(
+                chunk_type="references",
+                content="Kaplan et al. 2020. Scaling Laws for Neural Language Models.",
+                importance=0.6,
+            ),
+        ],
+        word_count=2000,
+        estimated_pages=8,
+    )

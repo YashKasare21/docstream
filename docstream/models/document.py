@@ -450,3 +450,61 @@ class SemanticDocument(BaseModel):
     metadata: dict[str, Any] = Field(default_factory=dict)
     word_count: int = 0
     estimated_pages: int = 1
+
+
+# ---------------------------------------------------------------------------
+# v2 template models
+# ---------------------------------------------------------------------------
+
+
+class TemplateField(BaseModel):
+    """Specification for a single field in a template schema.
+
+    Attributes:
+        name: Field identifier used as the key in ``TemplateData.fields``.
+        description: Human-readable description of the field's purpose.
+        required: Whether this field must be populated for a valid output.
+        chunk_types: ``SemanticChunk.chunk_type`` values that can fill this field.
+        multi: If ``True``, collect all matching chunks as a list of strings.
+               If ``False``, pick the highest-importance matching chunk.
+    """
+
+    name: str
+    description: str = ""
+    required: bool = True
+    chunk_types: list[str] = Field(default_factory=list)
+    multi: bool = False
+
+
+class TemplateSchema(BaseModel):
+    """Declares all fields expected by a LaTeX template.
+
+    Attributes:
+        template: Template name (e.g. ``"report"``, ``"resume"``).
+        description: Short human-readable description.
+        fields: Ordered list of field specifications.
+        best_for: ``DocumentType`` values this template is optimised for.
+    """
+
+    template: str
+    description: str = ""
+    fields: list[TemplateField] = Field(default_factory=list)
+    best_for: list[DocumentType] = Field(default_factory=list)
+
+
+class TemplateData(BaseModel):
+    """Filled template ready for LaTeX rendering.
+
+    Attributes:
+        template: Template name (e.g. ``"report"``, ``"resume"``).
+        fields: Mapping of field names to content strings or lists.
+        missing_required: Required fields that could not be filled.
+        warnings: Non-blocking issues to surface to the user.
+        score: Compatibility score in [0.0, 1.0].
+    """
+
+    template: str
+    fields: dict[str, Any] = Field(default_factory=dict)
+    missing_required: list[str] = Field(default_factory=list)
+    warnings: list[str] = Field(default_factory=list)
+    score: float = 0.0
