@@ -26,6 +26,7 @@ from docstream.core.structurer import DocumentStructurer
 
 # Exceptions
 from docstream.exceptions import (
+    AIUnavailableError,
     DocstreamError,
     ExtractionError,
     RenderingError,
@@ -40,9 +41,12 @@ from docstream.models.document import (
     ConversionResult,
     DocumentAST,
     DocumentMetadata,
+    DocumentType,
     Image,
     ListType,
     Section,
+    SemanticChunk,
+    SemanticDocument,
     Table,
 )
 
@@ -82,6 +86,40 @@ def extract(path: str | Path) -> list[Block]:
 
     router = FormatRouter()
     return router.extract(Path(path))
+
+
+def analyze(
+    blocks_or_path: list[Block] | str | Path,
+    ai_provider: object | None = None,
+) -> SemanticDocument:
+    """Semantically analyze a document.
+
+    Accepts either pre-extracted blocks or a file path (which will be
+    extracted automatically before analysis).
+
+    Args:
+        blocks_or_path: ``List[Block]`` from ``extract()`` **or** a file path
+                        (str or Path) to any supported format.
+        ai_provider:    Optional ``AIProviderChain`` instance. A new chain is
+                        built automatically from environment variables if not
+                        supplied.
+
+    Returns:
+        ``SemanticDocument`` with document type, chunks, and metadata.
+
+    Raises:
+        ExtractionError:    If the file cannot be read or format is unsupported.
+        StructuringError:   If the AI response is malformed.
+        AIUnavailableError: If no AI providers are available.
+    """
+    _load_env()
+    from docstream.core.format_router import FormatRouter
+    from docstream.core.semantic_analyzer import SemanticAnalyzer
+
+    if not isinstance(blocks_or_path, list):
+        blocks_or_path = FormatRouter().extract(Path(blocks_or_path))
+
+    return SemanticAnalyzer(ai_provider).analyze(blocks_or_path)
 
 
 def supported_formats() -> list[str]:
@@ -185,6 +223,7 @@ __all__ = [
     "__email__",
     "__license__",
     # Functional API
+    "analyze",
     "convert",
     "extract",
     "structure",
@@ -209,7 +248,12 @@ __all__ = [
     # Template system
     "TemplateType",
     "TemplateInfo",
+    # v2 semantic models
+    "DocumentType",
+    "SemanticChunk",
+    "SemanticDocument",
     # Exceptions
+    "AIUnavailableError",
     "DocstreamError",
     "ExtractionError",
     "StructuringError",

@@ -12,12 +12,15 @@ from docstream.models.document import (
     ConversionResult,
     DocumentAST,
     DocumentMetadata,
+    DocumentType,
     HeadingBlock,
     Image,
     ListBlock,
     ListType,
     RawContent,
     Section,
+    SemanticChunk,
+    SemanticDocument,
     Table,
     TextBlock,
 )
@@ -25,6 +28,7 @@ from docstream.models.document import (
 __all__ = [
     "DocumentAST",
     "DocumentMetadata",
+    "DocumentType",
     "Section",
     "Block",
     "TextBlock",
@@ -37,4 +41,6 @@ __all__ = [
     "RawContent",
     "BlockType",
     "ListType",
+    "SemanticChunk",
+    "SemanticDocument",
 ]

@@ -4,8 +4,8 @@ AI Provider — unified interface for all AI providers.
 Implements a fallback chain:
 1. Gemini 1.5 Flash  (primary — free tier, 1 500 req/day)
 2. Groq Llama 3.1 70B (fast fallback, generous free tier)
-3. Ollama             (local or Colab — no rate limits, always free)
-4. Raises AIUnavailableError if all providers fail
+3. Ollama             (local or Colab via ngrok — no rate limits)
+4. Raises AIUnavailableError if all providers fail or are unavailable
 
 All providers implement the same interface so the
 rest of the system doesn't care which one is used.
@@ -13,9 +13,17 @@ rest of the system doesn't care which one is used.
 
 from __future__ import annotations
 
+import logging
+import os
 
-class AIUnavailableError(Exception):
-    """Raised when all AI providers in the chain have been exhausted."""
+from docstream.exceptions import AIUnavailableError, APIError
+
+logger = logging.getLogger(__name__)
+
+
+# ---------------------------------------------------------------------------
+# Abstract base
+# ---------------------------------------------------------------------------
 
 
 class AIProvider:
@@ -30,100 +38,160 @@ class AIProvider:
 
         Returns:
             Model response as a plain string.
-
-        Raises:
-            NotImplementedError: Until this method is implemented.
         """
         raise NotImplementedError
+
+    def is_available(self) -> bool:
+        """Return True if this provider can accept requests right now."""
+        raise NotImplementedError
+
+
+# ---------------------------------------------------------------------------
+# Gemini provider
+# ---------------------------------------------------------------------------
 
 
 class GeminiProvider(AIProvider):
     """Calls Google Gemini 1.5 Flash via ``google-generativeai``."""
 
+    def __init__(self, api_key: str | None = None) -> None:
+        self.api_key = api_key or os.getenv("GEMINI_API_KEY")
+        if not self.api_key:
+            raise APIError("GEMINI_API_KEY not set")
+
     def complete(self, prompt: str, system: str = "") -> str:
-        """Generate a completion using Gemini 1.5 Flash.
+        """Call Gemini 1.5 Flash and return the response text."""
+        import google.generativeai as genai  # lazy import
 
-        Args:
-            prompt: User prompt.
-            system: Optional system instruction.
+        genai.configure(api_key=self.api_key)
+        model = genai.GenerativeModel(
+            model_name="gemini-1.5-flash",
+            system_instruction=system or None,
+        )
+        response = model.generate_content(prompt)
+        return response.text
 
-        Returns:
-            Model response as a plain string.
+    def is_available(self) -> bool:
+        return bool(self.api_key)
 
-        Raises:
-            NotImplementedError: Until this method is implemented.
-        """
-        raise NotImplementedError
+
+# ---------------------------------------------------------------------------
+# Groq provider
+# ---------------------------------------------------------------------------
 
 
 class GroqProvider(AIProvider):
     """Calls Groq (Llama 3.1 70B) via the ``groq`` SDK."""
 
+    def __init__(self, api_key: str | None = None) -> None:
+        self.api_key = api_key or os.getenv("GROQ_API_KEY")
+        if not self.api_key:
+            raise APIError("GROQ_API_KEY not set")
+
     def complete(self, prompt: str, system: str = "") -> str:
-        """Generate a completion using Groq Llama 3.1 70B.
+        """Call Groq Llama 3.1 70B and return the response text."""
+        from groq import Groq  # lazy import
 
-        Args:
-            prompt: User prompt.
-            system: Optional system instruction.
+        client = Groq(api_key=self.api_key)
+        messages: list[dict[str, str]] = []
+        if system:
+            messages.append({"role": "system", "content": system})
+        messages.append({"role": "user", "content": prompt})
 
-        Returns:
-            Model response as a plain string.
+        response = client.chat.completions.create(
+            model="llama-3.1-70b-versatile",
+            messages=messages,
+            temperature=0.1,
+            max_tokens=4096,
+        )
+        return response.choices[0].message.content
 
-        Raises:
-            NotImplementedError: Until this method is implemented.
-        """
-        raise NotImplementedError
+    def is_available(self) -> bool:
+        return bool(self.api_key)
+
+
+# ---------------------------------------------------------------------------
+# Ollama provider
+# ---------------------------------------------------------------------------
 
 
 class OllamaProvider(AIProvider):
-    """Connects to an Ollama instance (local or Colab via ngrok)."""
+    """Connects to an Ollama instance (local or Colab via ngrok).
 
-    def __init__(self, base_url: str = "http://localhost:11434") -> None:
-        """Initialize with the Ollama server URL.
+    Uses the official ``ollama`` Python package which supports a custom
+    ``host`` parameter for ngrok tunnels.
+    """
 
-        Args:
-            base_url: Base URL of the Ollama HTTP server.
-        """
-        self.base_url = base_url
+    def __init__(
+        self,
+        base_url: str | None = None,
+        model: str = "llama3.1:8b",
+    ) -> None:
+        self.base_url = base_url or os.getenv(
+            "OLLAMA_BASE_URL", "http://localhost:11434"
+        )
+        self.model = model
 
     def complete(self, prompt: str, system: str = "") -> str:
-        """Generate a completion via Ollama.
+        """Call the Ollama API and return the response text."""
+        import ollama  # lazy import
 
-        Args:
-            prompt: User prompt.
-            system: Optional system instruction.
+        client = ollama.Client(host=self.base_url)
+        messages: list[dict[str, str]] = []
+        if system:
+            messages.append({"role": "system", "content": system})
+        messages.append({"role": "user", "content": prompt})
 
-        Returns:
-            Model response as a plain string.
+        response = client.chat(model=self.model, messages=messages)
+        return response.message.content
 
-        Raises:
-            NotImplementedError: Until this method is implemented.
-        """
-        raise NotImplementedError
+    def is_available(self) -> bool:
+        """Return True if the Ollama server is reachable."""
+        try:
+            import ollama
+
+            ollama.Client(host=self.base_url).list()
+            return True
+        except Exception:
+            return False
+
+
+# ---------------------------------------------------------------------------
+# Provider chain
+# ---------------------------------------------------------------------------
 
 
 class AIProviderChain:
-    """Try providers in priority order, falling back on failure.
+    """Try AI providers in priority order, falling back on failure.
 
-    Default chain: Gemini → Groq → Ollama.
-    Raises ``AIUnavailableError`` if all providers fail.
+    Default chain (auto-built from environment):
+      Gemini 1.5 Flash → Groq Llama 3.1 70B → Ollama
+
+    Pass a ``providers`` list to override for testing.
+    Raises ``AIUnavailableError`` if every provider fails or is unreachable.
     """
 
     def __init__(
         self,
         providers: list[AIProvider] | None = None,
     ) -> None:
-        """Initialize with an ordered list of providers.
+        self._providers: list[AIProvider] = (
+            providers if providers is not None else self._build_chain()
+        )
 
-        Args:
-            providers: Ordered list of ``AIProvider`` instances.
-                       Defaults to ``[GeminiProvider, GroqProvider, OllamaProvider]``.
-        """
-        self.providers: list[AIProvider] = providers or [
-            GeminiProvider(),
-            GroqProvider(),
-            OllamaProvider(),
-        ]
+    def _build_chain(self) -> list[AIProvider]:
+        """Build provider list from available environment credentials."""
+        chain: list[AIProvider] = []
+
+        for cls in (GeminiProvider, GroqProvider):
+            try:
+                chain.append(cls())
+            except APIError:
+                pass  # key not set — skip silently
+
+        # Ollama is always added; availability is checked at call time
+        chain.append(OllamaProvider())
+        return chain
 
     def complete(self, prompt: str, system: str = "") -> str:
         """Try each provider in order and return the first success.
@@ -136,7 +204,40 @@ class AIProviderChain:
             Model response as a plain string.
 
         Raises:
-            AIUnavailableError: If every provider raises an exception.
-            NotImplementedError: Until this method is implemented.
+            AIUnavailableError: If every provider fails or is unavailable.
         """
-        raise NotImplementedError
+        last_error: Exception | None = None
+
+        for provider in self._providers:
+            # Skip Ollama if the server is not reachable right now
+            if isinstance(provider, OllamaProvider) and not provider.is_available():
+                continue
+
+            try:
+                result = provider.complete(prompt, system)
+                if result and result.strip():
+                    return result.strip()
+            except Exception as exc:
+                last_error = exc
+                logger.warning("%s failed: %s", provider.__class__.__name__, exc)
+
+        raise AIUnavailableError(
+            "All AI providers failed or are unavailable. "
+            "Check your API keys (GEMINI_API_KEY / GROQ_API_KEY) "
+            "or start an Ollama server. "
+            f"Last error: {last_error}"
+        )
+
+    @property
+    def available_providers(self) -> list[str]:
+        """Return the names of currently available providers."""
+        available: list[str] = []
+        for provider in self._providers:
+            if isinstance(provider, OllamaProvider):
+                if provider.is_available():
+                    available.append("Ollama")
+            else:
+                available.append(
+                    provider.__class__.__name__.replace("Provider", "")
+                )
+        return available

@@ -387,3 +387,66 @@ class ConversionResult(BaseModel):
     def has_warnings(self) -> bool:
         """Check if there are any warnings."""
         return len(self.warnings) > 0
+
+
+# ---------------------------------------------------------------------------
+# v2 semantic models
+# ---------------------------------------------------------------------------
+
+
+class DocumentType(StrEnum):
+    """High-level document category detected by ``SemanticAnalyzer``."""
+
+    RESUME = "resume"
+    RESEARCH_PAPER = "research_paper"
+    ACADEMIC_REPORT = "academic_report"
+    TECHNICAL_REPORT = "technical_report"
+    PRESENTATION = "presentation"
+    LETTER = "letter"
+    NOTES = "notes"
+    UNKNOWN = "unknown"
+
+
+class SemanticChunk(BaseModel):
+    """A semantically meaningful unit of document content.
+
+    Attributes:
+        chunk_type: Semantic category, e.g. ``"work_experience"``,
+                    ``"abstract"``, ``"introduction"``.
+        content: The actual text content of this chunk.
+        importance: Relevance weight in [0.0, 1.0].
+        metadata: Chunk-level key/value metadata (company, dates, etc.).
+        template_hints: Template names this chunk maps well to.
+    """
+
+    chunk_type: str
+    content: str
+    importance: float = 1.0
+    metadata: dict[str, Any] = Field(default_factory=dict)
+    template_hints: list[str] = Field(default_factory=list)
+
+
+class SemanticDocument(BaseModel):
+    """Fully analyzed document — output of ``SemanticAnalyzer.analyze()``.
+
+    Attributes:
+        document_type: Detected document category.
+        confidence: How confident the analyzer is in the type (0–1).
+        title: Detected or inferred document title.
+        language: ISO 639-1 language code (e.g. ``"en"``).
+        chunks: Ordered list of semantic chunks.
+        raw_blocks: Original blocks passed to the analyzer.
+        metadata: Global document metadata (author, email, etc.).
+        word_count: Total word count across all blocks.
+        estimated_pages: Estimated page count (word_count // 250).
+    """
+
+    document_type: DocumentType
+    confidence: float = 0.5
+    title: str = ""
+    language: str = "en"
+    chunks: list[SemanticChunk] = Field(default_factory=list)
+    raw_blocks: list[Block] = Field(default_factory=list)
+    metadata: dict[str, Any] = Field(default_factory=dict)
+    word_count: int = 0
+    estimated_pages: int = 1

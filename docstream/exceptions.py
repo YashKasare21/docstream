@@ -299,6 +299,12 @@ class ModelError(DocstreamError):
         return " ".join(parts)
 
 
+class AIUnavailableError(DocstreamError):
+    """Raised when all AI providers in the chain are unavailable or fail."""
+
+    pass
+
+
 # Utility functions for error handling
 def handle_extraction_error(func):
     """Decorator to handle extraction errors."""
