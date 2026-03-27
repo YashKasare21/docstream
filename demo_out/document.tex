@@ -1,0 +1,71 @@
+\documentclass[11pt,a4paper]{article}
+\usepackage[margin=1in]{geometry}
+\usepackage[T1]{fontenc}
+\usepackage{lmodern}
+\usepackage{hyperref}
+\usepackage{booktabs}
+\usepackage{microtype}
+\title{Attention Is All You Need}
+\author{Ashish VaswaniNoam ShazeerNiki ParmarJakob UszkoreitLlion JonesAidan N. GomezŁukasz KaiserIllia Polosukhin}
+\date{\today}
+\begin{document}
+\maketitle
+\paragraph{}
+
+The dominant sequence transduction models are based on complex recurrent or convolutional neural networks that include an encoder and a decoder. We propose a new simple network architecture, the Transformer, based solely on attention mechanisms, dispensing with recurrence and convolutions entirely.
+
+
+\paragraph{}
+
+Recurrent neural networks, long short-term memory and gated recurrent neural networks in particular, have been firmly established as state of the art approaches in sequence modeling and transduction problems such as language modeling and machine translation.
+
+
+Numerous efforts have since continued to push the boundaries of recurrent language models and encoder-decoder architectures.
+
+
+\paragraph{}
+
+The goal of reducing sequential computation also forms the foundation of the Extended Neural GPU, ByteNet and ConvS2S, all of which use convolutional neural networks as basic building block, computing hidden representations in parallel for all input and output positions.
+
+
+\paragraph{}
+
+Most competitive neural sequence transduction models have an encoder-decoder structure. Here, the encoder maps an input sequence of symbol representations to a sequence of continuous representations.
+
+
+\paragraph{}
+
+The encoder is composed of a stack of N = 6 identical layers. Each layer has two sub-layers.
+
+
+\paragraph{}
+
+An attention function can be described as mapping a query and a set of key-value pairs to an output, where the query, keys, values, and output are all vectors.
+
+
+\paragraph{}
+
+We call our particular attention 'Scaled Dot-Product Attention'.
+
+
+\paragraph{}
+
+Instead of performing a single attention function with dmodel-dimensional keys, values and queries, we found it beneficial to linearly project the queries, keys and values h times with different, learned linear projections to dk, dk and dv dimensions, respectively.
+
+
+\paragraph{}
+
+In this section we compare various aspects of self-attention layers to the recurrent and convolutional layers commonly used for mapping one variable-length sequence of symbol representations to another sequence of equal length.
+
+
+\paragraph{}
+
+This section describes the training regime for our models.
+
+
+\paragraph{}
+
+We trained on the standard WMT 2014 English-German dataset consisting of about 4.5 million sentence pairs.
+
+
+\end{document}
