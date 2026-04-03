@@ -165,7 +165,13 @@ rather than stopping mid-document. A complete \
 document with summarized content is better than \
 an incomplete document with full content.
 11. Do not use \\input{} or \\include{} commands
-12. Do not reference external image files"""
+12. Do not reference external image files
+13. For references/bibliography, ALWAYS use \
+\\begin{thebibliography}{99} ... \\end{thebibliography}. \
+NEVER use enumerate or itemize for references.
+14. Never create enumerate lists with more than 15 items. \
+Use itemize (bullet points) for longer lists.
+15. Do not use \\alph, \\Alph counters."""
 
 
 def _build_prompt(
@@ -306,22 +312,23 @@ def _extract_latex(response: str) -> str:
     else:
         latex = response[start:end + len(end_marker)]
 
-    # Post-process: handle figure references
-    latex = _fix_figure_references(latex)
+    # Post-process
+    latex = _postprocess_latex(latex)
 
     return latex
 
 
-def _fix_figure_references(latex: str) -> str:
+def _postprocess_latex(latex: str) -> str:
     """
-    Fix figure references that would cause compilation errors.
+    Post-process AI-generated LaTeX to fix common errors.
 
-    Replaces \\includegraphics{...} with a placeholder box
-    when the referenced file does not exist locally.
-    This prevents compilation failures from missing image files.
+    Fixes:
+    1. Replace \\includegraphics with placeholder boxes
+    2. Fix bibliography formatted as enumerate
+    3. Remove \\input{} and \\include{} commands
+    4. Fix overly long enumerate lists (>20 items → itemize)
     """
     def replace_includegraphics(match: re.Match) -> str:
-        """Replace a single \\includegraphics with a visible placeholder."""
         filename = match.group(1)
         display_name = filename.replace('{', '').replace('}', '')
         display_name = display_name.split('/')[-1][:30]
@@ -330,11 +337,46 @@ def _fix_figure_references(latex: str) -> str:
             r'\centering\small[Figure: ' + display_name + r']}}'
         )
 
-    # Match \includegraphics[options]{filename} and \includegraphics{filename}
+    # Fix 1: Replace \includegraphics with placeholder
     latex = re.sub(
         r'\\includegraphics(?:\[[^\]]*\])?\{([^}]+)\}',
         replace_includegraphics,
         latex,
+    )
+
+    # Fix 2: Replace enumerate used for references
+    # Pattern: \begin{enumerate} containing \bibitem
+    # This causes "Counter too large" with many refs
+    if '\\bibitem' in latex and '\\begin{enumerate}' in latex:
+        latex = re.sub(
+            r'\\begin\{enumerate\}(.*?)\\end\{enumerate\}',
+            lambda m: (
+                '\\begin{thebibliography}{99}'
+                + m.group(1)
+                + '\\end{thebibliography}'
+            ) if '\\bibitem' in m.group(1) else m.group(0),
+            latex,
+            flags=re.DOTALL,
+        )
+
+    # Fix 3: Remove \input{} and \include{} — reference missing files
+    latex = re.sub(r'\\input\{[^}]+\}', '', latex)
+    latex = re.sub(r'\\include\{[^}]+\}', '', latex)
+
+    # Fix 4: Fix overly long enumerate lists
+    # If > 20 items, convert to itemize (bullet points)
+    def fix_long_enumerate(match: re.Match) -> str:
+        content = match.group(1)
+        item_count = content.count('\\item')
+        if item_count > 20:
+            return '\\begin{itemize}' + content + '\\end{itemize}'
+        return match.group(0)
+
+    latex = re.sub(
+        r'\\begin\{enumerate\}(.*?)\\end\{enumerate\}',
+        fix_long_enumerate,
+        latex,
+        flags=re.DOTALL,
     )
 
     return latex
