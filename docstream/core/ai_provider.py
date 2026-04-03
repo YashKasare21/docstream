@@ -52,7 +52,21 @@ class AIProvider:
 
 
 class GeminiProvider(AIProvider):
-    """Calls Google Gemini via ``google-generativeai`` with model fallback."""
+    """
+    Google Gemini AI provider using the google-genai SDK.
+
+    Tries models in order of preference:
+    1. gemini-2.5-flash (best quality, free tier)
+    2. gemini-2.0-flash (fast, reliable)
+    3. gemini-2.0-flash-lite (lightweight fallback)
+    """
+
+    # Models to try in order (without 'models/' prefix)
+    MODELS = [
+        "gemini-2.5-flash",
+        "gemini-2.0-flash",
+        "gemini-2.0-flash-lite",
+    ]
 
     def __init__(self, api_key: str | None = None) -> None:
         self.api_key = api_key or os.getenv("GEMINI_API_KEY")
@@ -60,64 +74,50 @@ class GeminiProvider(AIProvider):
             raise APIError("GEMINI_API_KEY not set")
 
     def complete(self, prompt: str, system: str = "") -> str:
-        """Call Gemini API with current model names.
+        """Call Gemini API using google-genai SDK.
 
-        Tries models in order of preference, falling back on failure.
+        Tries models in order, returns first successful response.
         """
-        import google.generativeai as genai  # lazy import
+        from google import genai  # lazy import
+        from google.genai import types
 
-        genai.configure(api_key=self.api_key)
-
-        # Try models in order of preference
-        models_to_try = [
-            "gemini-2.0-flash",
-            "gemini-2.0-flash-lite",
-            "gemini-1.5-flash-latest",
-            "gemini-1.5-flash",
-            "gemini-pro",
-        ]
+        client = genai.Client(api_key=self.api_key)
 
         last_error = None
-        for model_name in models_to_try:
+
+        for model_name in self.MODELS:
             try:
-                model = genai.GenerativeModel(
-                    model_name=model_name,
-                    system_instruction=system if system else None,
+                config = types.GenerateContentConfig(
+                    temperature=0.1,
+                    max_output_tokens=8192,
                 )
-                response = model.generate_content(
-                    prompt,
-                    generation_config={
-                        "temperature": 0.1,
-                        "max_output_tokens": 8192,
-                    },
+
+                if system:
+                    config.system_instruction = system
+
+                response = client.models.generate_content(
+                    model=model_name,
+                    contents=prompt,
+                    config=config,
                 )
+
                 if response.text:
                     logger.info(
-                        f"Gemini responded using model: {model_name}"
+                        f"Gemini responded using: {model_name}"
                     )
                     return response.text
+
             except Exception as e:
                 last_error = e
-                logger.debug(f"Model {model_name} failed: {e}")
+                logger.debug(
+                    f"Gemini model {model_name} failed: {e}"
+                )
                 continue
 
         raise APIError(
-            f"All Gemini models failed. Last error: {last_error}"
+            f"All Gemini models failed. "
+            f"Last error: {last_error}"
         )
-
-    def list_available_models(self) -> list[str]:
-        """List available Gemini models for debugging."""
-        import google.generativeai as genai  # lazy import
-
-        genai.configure(api_key=self.api_key)
-        try:
-            models = genai.list_models()
-            return [
-                m.name for m in models
-                if "generateContent" in m.supported_generation_methods
-            ]
-        except Exception as e:
-            return [f"Error listing models: {e}"]
 
     def is_available(self) -> bool:
         return bool(self.api_key)
