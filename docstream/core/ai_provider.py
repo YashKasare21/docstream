@@ -79,6 +79,7 @@ class GeminiProvider(AIProvider):
         Tries models in order, returns first successful response.
         Retries once per model on 429 rate-limit errors with backoff.
         """
+        import re
         import time
 
         from google import genai  # lazy import

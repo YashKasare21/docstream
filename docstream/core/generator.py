@@ -696,4 +696,18 @@ def _postprocess_latex(latex: str) -> str:
         flags=re.DOTALL,
     )
 
+    # Fix 5: Replace dagger symbols not available in XeLaTeX TU encoding
+    latex = latex.replace(r'\textddagger', r'\ddag')
+    latex = latex.replace(r'\textdagger', r'\dag')
+
+    # Fix 6: Replace other TU-encoding-incompatible symbols
+    for old, new in (
+        (r'\textparagraph', r'\P'),
+        (r'\textsection', r'\S'),
+        (r'\texttrademark', 'TM'),
+        (r'\textordfeminine', 'a'),
+        (r'\textordmasculine', 'o'),
+    ):
+        latex = latex.replace(old, new)
+
     return latex
