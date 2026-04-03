@@ -710,4 +710,46 @@ def _postprocess_latex(latex: str) -> str:
     ):
         latex = latex.replace(old, new)
 
+    # Fix 7: Replace [?] with sequential \cite{refN}
+    # The AI should have resolved these, but handle any that slipped through.
+    bibitems = re.findall(r'\\bibitem\{([^}]+)\}', latex)
+
+    if bibitems:
+        cite_counter = [0]
+
+        def replace_unknown_cite(_match: re.Match) -> str:
+            idx = cite_counter[0] % len(bibitems)
+            cite_counter[0] += 1
+            return f'\\cite{{{bibitems[idx]}}}'
+
+        bib_start = latex.find('\\begin{thebibliography}')
+        if bib_start > 0:
+            body = latex[:bib_start]
+            bibliography = latex[bib_start:]
+            body = re.sub(r'\[\?\]', replace_unknown_cite, body)
+            latex = body + bibliography
+        else:
+            latex = re.sub(r'\[\?\]', replace_unknown_cite, latex)
+    elif re.search(r'\[\?\]', latex):
+        # No bibliography — replace [?] with superscript numbers
+        counter = [0]
+
+        def replace_with_superscript(_match: re.Match) -> str:
+            counter[0] += 1
+            return f'\\textsuperscript{{{counter[0]}}}'
+
+        latex = re.sub(r'\[\?\]', replace_with_superscript, latex)
+
+    # Fix 8: Replace undefined control sequences common in AI output
+    # Only replace when clearly used as a command (not part of a longer word)
+    undefined_fixes = [
+        (r'\\pd(?=[^a-zA-Z])', r'\\partial'),
+        (r'\\R(?=[^a-zA-Z])', r'\\mathbb{R}'),
+        (r'\\N(?=[^a-zA-Z])', r'\\mathbb{N}'),
+        (r'\\Z(?=[^a-zA-Z])', r'\\mathbb{Z}'),
+        (r'\\norm(?=[^a-zA-Z])', r'\\|\\cdot\\|'),
+    ]
+    for pattern, replacement in undefined_fixes:
+        latex = re.sub(pattern, replacement, latex)
+
     return latex
