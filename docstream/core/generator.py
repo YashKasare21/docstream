@@ -51,6 +51,12 @@ def generate_latex(
         TemplateError: If template name is invalid
         StructuringError: If AI fails to generate valid LaTeX
     """
+    try:
+        from dotenv import load_dotenv
+        load_dotenv()
+    except ImportError:
+        pass  # dotenv not installed — keys must be in env already
+
     from docstream.exceptions import TemplateError, StructuringError
     from docstream.core.ai_provider import AIProviderChain
 

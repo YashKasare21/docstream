@@ -253,6 +253,12 @@ class AIProviderChain:
 
     def _build_chain(self) -> list[AIProvider]:
         """Build provider list from available environment credentials."""
+        try:
+            from dotenv import load_dotenv
+            load_dotenv()
+        except ImportError:
+            pass  # dotenv not installed — keys must be in env already
+
         chain: list[AIProvider] = []
 
         for cls in (GeminiProvider, GroqProvider):
