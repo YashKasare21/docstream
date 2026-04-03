@@ -166,12 +166,21 @@ document with summarized content is better than \
 an incomplete document with full content.
 11. Do not use \\input{} or \\include{} commands
 12. Do not reference external image files
-13. For references/bibliography, ALWAYS use \
-\\begin{thebibliography}{99} ... \\end{thebibliography}. \
-NEVER use enumerate or itemize for references.
-14. Never create enumerate lists with more than 15 items. \
+13. For references: collect all [REF] lines from the content \
+and format as thebibliography. Each [REF] entry becomes a \
+\\bibitem. Example: [REF] [1] Vaswani et al., "Attention is \
+All You Need" becomes \\bibitem{ref1} Vaswani et al., \
+``Attention is All You Need,'' 2017.
+Use \\cite{ref1}, \\cite{ref2} etc. in text where citations \
+appear as [?] or [number]. NEVER use enumerate or itemize \
+for references.
+14. CITATION HANDLING: When you see [?] in the text, replace \
+with \\cite{refN} where N matches the corresponding reference \
+number. If no bibliography entries exist, replace [?] with \
+\\textsuperscript{N} using sequential numbers.
+15. Never create enumerate lists with more than 15 items. \
 Use itemize (bullet points) for longer lists.
-15. Do not use \\alph, \\Alph counters."""
+16. Do not use \\alph, \\Alph counters."""
 
 
 def _build_prompt(
@@ -204,6 +213,8 @@ def _build_prompt(
             content_parts.append(f"{prefix} {text}")
         elif block_type == "table":
             content_parts.append(f"[TABLE]\n{text}\n[/TABLE]")
+        elif block_type == "reference":
+            content_parts.append(f"[REF] {text}")
         else:
             content_parts.append(text)
 

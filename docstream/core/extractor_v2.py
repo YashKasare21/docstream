@@ -212,6 +212,9 @@ def _process_document(
     # Sort structure by page number
     structure.sort(key=lambda x: x["page"])
 
+    # Mark reference/bibliography blocks
+    structure = _identify_references(structure)
+
     # Build full text
     full_text = "\n\n".join(
         block["text"] for block in structure
@@ -254,6 +257,44 @@ def _process_document(
         "full_text": full_text,
         "body_font_size": body_font_size,
     }
+
+
+def _identify_references(structure: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """
+    Identify and mark reference/bibliography blocks.
+
+    References typically appear at the end of papers under a
+    "References" heading, with entries like [1] Author, Title...
+    """
+    ref_heading_names = {
+        "references", "bibliography", "works cited", "citations"
+    }
+    ref_entry_pattern = re.compile(r'^\[\d+\]')
+
+    in_references = False
+    result: list[dict[str, Any]] = []
+
+    for block in structure:
+        text = block.get("text", "")
+
+        # Detect References section heading
+        if (
+            block["type"] == "heading"
+            and text.strip().lower() in ref_heading_names
+        ):
+            in_references = True
+            result.append(block)
+            continue
+
+        # If inside references section, mark matching paragraph blocks
+        if in_references and block["type"] == "paragraph":
+            if ref_entry_pattern.match(text.strip()):
+                result.append({**block, "type": "reference"})
+                continue
+
+        result.append(block)
+
+    return result
 
 
 def _estimate_heading_level(

@@ -59,6 +59,15 @@ If acknowledgments found:
 Acknowledgment text here.
 Otherwise: leave empty (empty string)
 
+CITATION HANDLING:
+The extracted text may contain [?] where citations should appear.
+When you see [?] in the text:
+- Replace with \cite{refN} where N is the corresponding reference number
+- Keep track of which citation number corresponds to which reference
+- Match [?] occurrences to references in the bibliography
+If no bibliography entries are found:
+- Replace all [?] with \textsuperscript{N} using sequential numbers
+
 <<BIBLIOGRAPHY_BLOCK>>
 If references found, format as:
 \begin{thebibliography}{99}

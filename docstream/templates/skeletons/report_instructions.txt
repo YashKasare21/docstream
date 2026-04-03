@@ -19,6 +19,13 @@ Abstract text. One or more paragraphs.
 No commands inside.
 
 <<SECTIONS>>
+If the document has 4 or more sections, include at the very
+start of <<SECTIONS>> (before the first \section{}):
+\tableofcontents
+\newpage
+
+Otherwise omit the table of contents entirely.
+
 Each section formatted as:
 \section{Section Title}
 Section content as paragraphs.
@@ -47,6 +54,15 @@ For equations:
 E = mc^2
 \label{eq:einstein}
 \end{equation}
+
+CITATION HANDLING:
+The extracted text may contain [?] where citations should appear.
+When you see [?] in the text:
+- Replace with \cite{refN} where N is the corresponding reference number
+- Keep track of which citation number corresponds to which reference
+- Match [?] occurrences to references in the bibliography
+If no bibliography entries are found:
+- Replace all [?] with \textsuperscript{N} using sequential numbers
 
 <<BIBLIOGRAPHY_BLOCK>>
 Format references as:
