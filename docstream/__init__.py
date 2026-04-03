@@ -1,345 +1,181 @@
 """
-DocStream: Professional Document Conversion Library
+Docstream — PDF to LaTeX conversion library.
 
-DocStream provides seamless bidirectional conversion between PDF and LaTeX formats
-with AI-powered content extraction and template-based rendering.
+Simple 3-step pipeline:
+1. Extract structured text from PDF
+2. AI generates LaTeX from template skeleton
+3. XeLaTeX compiles to PDF
+
+Basic usage:
+    import docstream
+    result = docstream.convert("paper.pdf", template="ieee")
+    print(result.tex_path)   # Path to .tex file
+    print(result.pdf_path)   # Path to .pdf file
 """
 
 from __future__ import annotations
 
+__version__ = "0.2.0"
+__all__ = ["convert", "extract", "generate", "ConversionResult"]
+
 import logging
-import os
 from pathlib import Path
 
-__version__ = "0.2.0-dev"
-__author__ = "Your Name"
-__email__ = "your.email@example.com"
-__license__ = "MIT"
-
-# Core classes
-from docstream.core.docstream import DocStream, DocStreamConfig
-
-# Phase 1-3 core classes — imported here so patch("docstream.X") works in tests
-from docstream.core.extractor import PDFExtractor
-from docstream.core.renderer import DocumentRenderer, TemplateInfo, TemplateType
-from docstream.core.structurer import DocumentStructurer
-
-# Exceptions
-from docstream.exceptions import (
-    AIUnavailableError,
-    DocstreamError,
-    ExtractionError,
-    RenderingError,
-    StructuringError,
-    ValidationError,
-)
-
-# Models
-from docstream.models.document import (
-    Block,
-    BlockType,
-    ConversionResult,
-    DocumentAST,
-    DocumentMetadata,
-    DocumentType,
-    Image,
-    ListType,
-    Section,
-    SemanticChunk,
-    SemanticDocument,
-    Table,
-    TemplateData,
-    TemplateField,
-    TemplateSchema,
-    QualityReport,
-)
+logger = logging.getLogger(__name__)
 
 
-def _load_env() -> None:
-    """Load .env file if present (silent if python-dotenv is missing)."""
-    try:
-        from dotenv import load_dotenv
+class ConversionResult:
+    """Result of a PDF conversion operation."""
 
-        load_dotenv()
-    except ImportError:
-        pass
+    def __init__(
+        self,
+        success: bool,
+        tex_path: Path | None = None,
+        pdf_path: Path | None = None,
+        error: str | None = None,
+        processing_time: float = 0.0,
+        template_used: str = "",
+    ):
+        """Initialize conversion result.
 
+        Args:
+            success: Whether the conversion succeeded
+            tex_path: Path to the generated .tex file
+            pdf_path: Path to the generated .pdf file
+            error: Error message if conversion failed
+            processing_time: Total processing time in seconds
+            template_used: Name of the template used
+        """
+        self.success = success
+        self.tex_path = tex_path
+        self.pdf_path = pdf_path
+        self.error = error
+        self.processing_time = processing_time
+        self.template_used = template_used
 
-# ---------------------------------------------------------------------------
-# Public functional API
-# ---------------------------------------------------------------------------
-
-
-def extract(path: str | Path) -> list[Block]:
-    """Extract raw content blocks from any supported document format.
-
-    Supports: PDF, DOCX, PPTX, JPG, PNG, MD, TXT.
-
-    Args:
-        path: Path to the input file (str or Path).
-
-    Returns:
-        List of Block objects with text, font metadata, bounding boxes, etc.
-
-    Raises:
-        ExtractionError: If the file cannot be read, parsed, or the
-                         format is not supported.
-    """
-    _load_env()
-    from docstream.core.format_router import FormatRouter
-
-    router = FormatRouter()
-    return router.extract(Path(path))
-
-
-def analyze(
-    blocks_or_path: list[Block] | str | Path,
-    ai_provider: object | None = None,
-) -> SemanticDocument:
-    """Semantically analyze a document.
-
-    Accepts either pre-extracted blocks or a file path (which will be
-    extracted automatically before analysis).
-
-    Args:
-        blocks_or_path: ``List[Block]`` from ``extract()`` **or** a file path
-                        (str or Path) to any supported format.
-        ai_provider:    Optional ``AIProviderChain`` instance. A new chain is
-                        built automatically from environment variables if not
-                        supplied.
-
-    Returns:
-        ``SemanticDocument`` with document type, chunks, and metadata.
-
-    Raises:
-        ExtractionError:    If the file cannot be read or format is unsupported.
-        StructuringError:   If the AI response is malformed.
-        AIUnavailableError: If no AI providers are available.
-    """
-    _load_env()
-    from docstream.core.format_router import FormatRouter
-    from docstream.core.semantic_analyzer import SemanticAnalyzer
-
-    if not isinstance(blocks_or_path, list):
-        blocks_or_path = FormatRouter().extract(Path(blocks_or_path))
-
-    return SemanticAnalyzer(ai_provider).analyze(blocks_or_path)
-
-
-def match_template(
-    doc: SemanticDocument,
-    template: str,
-) -> TemplateData:
-    """Map a ``SemanticDocument`` to a specific template's fields.
-
-    Args:
-        doc:      ``SemanticDocument`` produced by ``analyze()``.
-        template: Template name — ``"report"``, ``"ieee"``, ``"resume"``,
-                  ``"altacv"``, or ``"moderncv"``.
-
-    Returns:
-        ``TemplateData`` with populated fields, missing_required list,
-        warnings, and a compatibility score.
-
-    Raises:
-        TemplateError: If *template* is not one of the five built-in names.
-    """
-    from docstream.core.template_matcher import TemplateMatcher
-
-    return TemplateMatcher().match(doc, template)
-
-
-def recommend_templates(
-    doc: SemanticDocument,
-) -> list[tuple[str, float]]:
-    """Return all templates ranked by compatibility with *doc* (descending).
-
-    Args:
-        doc: ``SemanticDocument`` produced by ``analyze()``.
-
-    Returns:
-        List of ``(template_name, score)`` tuples, highest score first.
-        Always returns exactly five entries.
-    """
-    from docstream.core.template_matcher import TemplateMatcher
-
-    return TemplateMatcher().recommend_templates(doc)
-
-
-def check_quality(
-    latex_content: str,
-    template: str,
-    skip_compilation: bool = False,
-) -> QualityReport:
-    """Check quality of generated LaTeX content before delivery.
-
-    Runs static analysis (always) and optionally compiles with xelatex
-    to verify it produces a PDF.
-
-    Args:
-        latex_content:    Complete LaTeX document string.
-        template:         Template name used to generate this LaTeX.
-        skip_compilation: If ``True``, skip xelatex (faster, less thorough).
-
-    Returns:
-        ``QualityReport`` with scores, errors, and warnings.
-    """
-    from docstream.core.quality_checker import QualityChecker
-
-    return QualityChecker().check(latex_content, template, skip_compilation)
-
-
-def supported_formats() -> list[str]:
-    """Return all supported input file extensions.
-
-    Returns:
-        List of extension strings, e.g. ``['.pdf', '.docx', ...]``.
-    """
-    from docstream.core.format_router import FormatRouter
-
-    return FormatRouter.supported_extensions()
-
-
-def structure(
-    blocks: list[Block],
-    gemini_key: str | None = None,
-    groq_key: str | None = None,
-) -> DocumentAST:
-    """Structure raw blocks into a DocumentAST using AI.
-
-    API keys are loaded from GEMINI_API_KEY / GROQ_API_KEY environment
-    variables automatically when not supplied explicitly.
-
-    Args:
-        blocks: List of Block objects (output of ``extract()``).
-        gemini_key: Google Gemini API key (overrides env).
-        groq_key:   Groq API key (overrides env).
-
-    Returns:
-        DocumentAST representing the fully structured document.
-
-    Raises:
-        StructuringError: If all AI providers fail.
-    """
-    _load_env()
-    gk = gemini_key or os.environ.get("GEMINI_API_KEY", "")
-    rk = groq_key or os.environ.get("GROQ_API_KEY")
-    structurer = DocumentStructurer(gemini_key=gk, groq_key=rk)
-    return structurer.structure(blocks)
-
-
-def render(
-    ast: DocumentAST,
-    template: str = "report",
-    output_dir: str | Path = "./out",
-) -> ConversionResult:
-    """Render a DocumentAST to ``.tex`` and ``.pdf`` via Pandoc + XeLaTeX.
-
-    Args:
-        ast:        DocumentAST to render.
-        template:   Template name — ``"report"``, ``"ieee"``, or ``"resume"``.
-        output_dir: Directory for output files (created if absent).
-
-    Returns:
-        ConversionResult with ``tex_path``, ``pdf_path``, and timing info.
-
-    Raises:
-        RenderingError: If Pandoc or XeLaTeX compilation fails.
-        ValueError:     If *template* is not one of the built-in names.
-    """
-    renderer = DocumentRenderer(template=template)
-    return renderer.render(ast, Path(output_dir))
+    def __repr__(self) -> str:
+        """Return string representation of conversion result."""
+        if self.success:
+            return (
+                f"ConversionResult(success=True, "
+                f"template={self.template_used!r}, "
+                f"pdf={self.pdf_path})"
+            )
+        return f"ConversionResult(success=False, error={self.error!r})"
 
 
 def convert(
-    path: str | Path,
+    pdf_path: str | Path,
     template: str = "report",
-    output_dir: str | Path = "./out",
+    output_dir: str | Path = "./docstream_output",
+    ai_provider=None,
 ) -> ConversionResult:
-    """Convert a PDF to structured LaTeX + PDF in one call.
+    """
+    Convert a PDF to LaTeX and PDF.
 
-    Internally chains: ``extract()`` → ``structure()`` → ``render()``.
+    This is the main entry point for Docstream.
+
+    Pipeline:
+    1. Extract structured text from PDF using PyMuPDF
+    2. AI fills LaTeX template skeleton with content
+    3. XeLaTeX compiles LaTeX to PDF
 
     Args:
-        path:       Path to the input PDF file.
-        template:   Output template — ``"report"``, ``"ieee"``, or ``"resume"``.
-        output_dir: Directory for output files (default: ``"./out"``).
+        pdf_path: Path to the input PDF file
+        template: 'report' or 'ieee' (default: 'report')
+        output_dir: Directory for output files
+        ai_provider: Optional custom AI provider chain
 
     Returns:
-        ConversionResult with ``tex_path``, ``pdf_path``, and timing info.
+        ConversionResult with tex_path and pdf_path on success
 
-    Example::
-
-        from docstream import convert
-        result = convert("paper.pdf", template="ieee", output_dir="./out")
-        print(result.pdf_path)
+    Example:
+        result = docstream.convert("paper.pdf", template="ieee")
+        if result.success:
+            print(f"LaTeX: {result.tex_path}")
+            print(f"PDF: {result.pdf_path}")
     """
-    blocks = extract(path)
-    ast = structure(blocks)
-    return render(ast, template=template, output_dir=Path(output_dir))
+    import time
+    from docstream.core.extractor_v2 import extract_structured
+    from docstream.core.generator import generate_latex
+    from docstream.core.compiler import compile_latex
+    from docstream.exceptions import DocstreamError
+
+    start_time = time.time()
+    output_dir = Path(output_dir)
+
+    try:
+        # Step 1: Extract
+        logger.info(f"Step 1/3: Extracting from {Path(pdf_path).name}")
+        document = extract_structured(pdf_path)
+        logger.info(
+            f"Extracted {len(document['structure'])} blocks"
+        )
+
+        # Step 2: Generate LaTeX
+        logger.info(f"Step 2/3: Generating LaTeX ({template} template)")
+        latex = generate_latex(document, template, ai_provider)
+        logger.info(f"Generated {len(latex)} chars of LaTeX")
+
+        # Step 3: Compile
+        logger.info("Step 3/3: Compiling with XeLaTeX")
+        tex_path, pdf_path_out = compile_latex(
+            latex, output_dir
+        )
+
+        processing_time = round(time.time() - start_time, 1)
+        logger.info(f"Conversion complete in {processing_time}s")
+
+        return ConversionResult(
+            success=True,
+            tex_path=tex_path,
+            pdf_path=pdf_path_out,
+            processing_time=processing_time,
+            template_used=template,
+        )
+
+    except DocstreamError as e:
+        processing_time = round(time.time() - start_time, 1)
+        logger.error(f"Conversion failed: {e}")
+        return ConversionResult(
+            success=False,
+            error=str(e),
+            processing_time=processing_time,
+            template_used=template,
+        )
+
+    except Exception as e:
+        processing_time = round(time.time() - start_time, 1)
+        logger.error(f"Unexpected error: {e}", exc_info=True)
+        return ConversionResult(
+            success=False,
+            error=f"Unexpected error: {e}",
+            processing_time=processing_time,
+            template_used=template,
+        )
 
 
-# ---------------------------------------------------------------------------
-# Public API surface
-# ---------------------------------------------------------------------------
+def extract(pdf_path: str | Path) -> dict:
+    """
+    Extract structured content from a PDF.
 
-__all__ = [
-    # Version
-    "__version__",
-    "__author__",
-    "__email__",
-    "__license__",
-    # Functional API
-    "analyze",
-    "check_quality",
-    "convert",
-    "extract",
-    "match_template",
-    "recommend_templates",
-    "structure",
-    "render",
-    "supported_formats",
-    # Core classes
-    "DocStream",
-    "DocStreamConfig",
-    "PDFExtractor",
-    "DocumentStructurer",
-    "DocumentRenderer",
-    # Data models
-    "DocumentAST",
-    "DocumentMetadata",
-    "Section",
-    "Block",
-    "Table",
-    "Image",
-    "ConversionResult",
-    "BlockType",
-    "ListType",
-    # Template system
-    "TemplateType",
-    "TemplateInfo",
-    # v2 semantic models
-    "DocumentType",
-    "SemanticChunk",
-    "SemanticDocument",
-    # v2 template models
-    "TemplateField",
-    "TemplateSchema",
-    "TemplateData",
-    # v2 quality models
-    "QualityReport",
-    # Exceptions
-    "AIUnavailableError",
-    "DocstreamError",
-    "ExtractionError",
-    "StructuringError",
-    "RenderingError",
-    "ValidationError",
-]
+    Returns raw structured document dict.
+    Useful for inspecting extraction quality before converting.
+    """
+    from docstream.core.extractor_v2 import extract_structured
+    return extract_structured(pdf_path)
 
-# Package metadata
-PACKAGE_NAME = "docstream"
-DESCRIPTION = "Professional document conversion library (PDF ↔ LaTeX)"
-URL = "https://github.com/YashKasare21/docstream"
 
-logging.getLogger(__name__).addHandler(logging.NullHandler())
+def generate(
+    document: dict,
+    template: str = "report",
+    ai_provider=None,
+) -> str:
+    """
+    Generate LaTeX from extracted document content.
+
+    Returns complete LaTeX string.
+    Useful for inspecting AI output before compiling.
+    """
+    from docstream.core.generator import generate_latex
+    return generate_latex(document, template, ai_provider)

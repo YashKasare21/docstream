@@ -1,0 +1,68 @@
+TEMPLATE: IEEE Conference Paper (IEEEtran)
+DOCUMENT CLASS: IEEEtran, conference mode
+LAYOUT: Two-column
+
+PLACEHOLDER RULES:
+
+<<TITLE>>
+Replace with the paper title.
+Do NOT wrap in quotes or braces — just the plain title text.
+Example: Deep Learning for Document Analysis
+
+<<AUTHORS_BLOCK>>
+Use IEEEauthorblockN and IEEEauthorblockA format.
+Example:
+\IEEEauthorblockN{John Smith\textsuperscript{1}, Jane Doe\textsuperscript{2}}
+\IEEEauthorblockA{\textsuperscript{1}University of X, City, Country\\
+\textsuperscript{2}Company Y, City, Country\\
+john@university.edu}
+If no authors found, use: \IEEEauthorblockN{Author Name}
+
+<<ABSTRACT>>
+The paper abstract text only. No commands. Max 250 words.
+Must be one paragraph.
+
+<<KEYWORDS>>
+Comma-separated lowercase keywords.
+Example: machine learning, document processing, latex
+
+<<SECTIONS>>
+Each major section formatted as:
+\section{SECTION TITLE IN CAPS}
+Section content as paragraphs.
+
+\subsection{Subsection Title}
+Subsection content.
+
+Use Roman numeral logic for IEEE:
+First section is typically Introduction.
+Common sections: Introduction, Related Work,
+Methodology/Methods, Results, Discussion, Conclusion.
+
+For tables use:
+\begin{table}[htbp]
+\caption{Table Title}
+\begin{center}
+\begin{tabular}{|c|c|}
+\hline
+\textbf{Header 1} & \textbf{Header 2} \\
+\hline
+value & value \\
+\hline
+\end{tabular}
+\end{center}
+\end{table}
+
+<<ACKNOWLEDGMENT_BLOCK>>
+If acknowledgments found:
+\section*{Acknowledgment}
+Acknowledgment text here.
+Otherwise: leave empty (empty string)
+
+<<BIBLIOGRAPHY_BLOCK>>
+If references found, format as:
+\begin{thebibliography}{99}
+\bibitem{ref1} Author, ``Title,'' Journal, vol. X, pp. Y--Z, Year.
+\bibitem{ref2} Author, Title. Publisher, Year.
+\end{thebibliography}
+Otherwise: leave empty

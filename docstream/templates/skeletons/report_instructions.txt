@@ -1,0 +1,64 @@
+TEMPLATE: Academic/Technical Report (article class)
+DOCUMENT CLASS: article, 12pt, a4paper
+LAYOUT: Single-column, 1.5 line spacing
+
+PLACEHOLDER RULES:
+
+<<TITLE>>
+The document title. Plain text only.
+
+<<AUTHOR>>
+Author name(s). If multiple: Name1 \and Name2
+
+<<DATE>>
+Date if found in document.
+If not found: \today
+
+<<ABSTRACT>>
+Abstract text. One or more paragraphs.
+No commands inside.
+
+<<SECTIONS>>
+Each section formatted as:
+\section{Section Title}
+Section content as paragraphs.
+
+\subsection{Subsection Title}
+Content.
+
+\subsubsection{Sub-subsection Title}
+Content.
+
+For tables use booktabs format:
+\begin{table}[H]
+\centering
+\caption{Table caption}
+\begin{tabular}{lcc}
+\toprule
+Header 1 & Header 2 & Header 3 \\
+\midrule
+value & value & value \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+For equations:
+\begin{equation}
+E = mc^2
+\label{eq:einstein}
+\end{equation}
+
+<<BIBLIOGRAPHY_BLOCK>>
+Format references as:
+\begin{thebibliography}{99}
+\bibitem{ref1}
+A.~B. Jones and J.~M. Smith,
+``Article Title,''
+\textit{Journal Title}, vol.~13, no.~52,
+pp.~123--456, Mar. 2013.
+\bibitem{ref2}
+J.~M. Smith and A.~B. Jones,
+\textit{Book Title}.
+Publisher, 7th~ed., 2012.
+\end{thebibliography}
+If no references: leave empty
