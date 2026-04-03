@@ -54,6 +54,9 @@ def compile_latex(
         tmpdir = Path(tmpdir)
         tex_file = tmpdir / f"{filename}.tex"
 
+        # Ensure document is complete before compiling
+        latex_content = _ensure_complete_latex(latex_content)
+
         # Write LaTeX file
         tex_file.write_text(latex_content, encoding="utf-8")
 
@@ -95,6 +98,49 @@ def compile_latex(
             )
 
         return output_tex, output_pdf
+
+
+def _ensure_complete_latex(latex: str) -> str:
+    """
+    Ensure LaTeX document is complete and compilable.
+
+    If document is truncated (missing \\end{document}),
+    close all open environments and add the end marker.
+    """
+    from collections import Counter
+
+    if "\\end{document}" in latex:
+        return latex
+
+    # Document is truncated — emergency repair
+    begins = re.findall(r'\\begin\{(\w+)\}', latex)
+    ends = re.findall(r'\\end\{(\w+)\}', latex)
+
+    begin_counts: Counter[str] = Counter(begins)
+    end_counts: Counter[str] = Counter(ends)
+
+    # Find unclosed environments (in open order), skip 'document'
+    # since we always append \end{document} explicitly below
+    open_envs: list[str] = []
+    for env in begins:
+        if env == "document":
+            continue
+        if begin_counts[env] > end_counts.get(env, 0):
+            open_envs.append(env)
+            end_counts[env] = end_counts.get(env, 0) + 1
+
+    closing = ""
+    for env in reversed(open_envs):
+        closing += f"\n\\end{{{env}}}"
+
+    closing += "\n\\end{document}"
+
+    logger.warning(
+        "LaTeX was truncated — added emergency closing: %s",
+        closing.strip(),
+    )
+
+    return latex + closing
 
 
 def _xelatex_available() -> bool:

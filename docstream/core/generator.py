@@ -180,7 +180,24 @@ number. If no bibliography entries exist, replace [?] with \
 \\textsuperscript{N} using sequential numbers.
 15. Never create enumerate lists with more than 15 items. \
 Use itemize (bullet points) for longer lists.
-16. Do not use \\alph, \\Alph counters."""
+16. Do not use \\alph, \\Alph counters.
+17. Keep \\title{} SHORT — maximum 2 lines. Move footnotes \
+and acknowledgments to AFTER \\maketitle using \
+\\footnotetext{} or a separate section. NEVER put long \
+text inside \\thanks{}.
+18. CRITICAL — output budget management: write sections in \
+this strict order: (1) \\documentclass and packages, \
+(2) \\title{Short title only}, (3) \\author{names}, \
+(4) \\date{}, (5) \\begin{document}, (6) \\maketitle, \
+(7) \\begin{abstract}...\\end{abstract} — MUST complete, \
+(8) keywords if needed, (9) sections as many as fit, \
+(10) bibliography, (11) \\end{document} — MUST include. \
+If running long, SHORTEN SECTIONS — never skip \
+\\end{abstract} or \\end{document}.
+19. For author footnotes (∗ † ‡ symbols): use \
+\\thanks{brief note} inline — keep each \\thanks{} \
+under 20 words. Example: \
+\\author{John Smith\\thanks{Google Brain}}"""
 
 
 def _build_prompt(
@@ -219,6 +236,9 @@ def _build_prompt(
             content_parts.append(text)
 
     structured_content = "\n\n".join(content_parts)
+
+    # Preprocess to move footnotes away from title area
+    structured_content = _preprocess_content(structured_content)
 
     # Truncate if too long (preserve first 80%, last 20%)
     if len(structured_content) > max_chars:
@@ -279,6 +299,43 @@ section or empty string if none found
 Return the complete LaTeX document now:"""
 
     return prompt
+
+
+def _preprocess_content(structured_content: str) -> str:
+    """
+    Preprocess content to prevent AI from stuffing
+    footnotes into \\title{\\thanks{}}.
+
+    Moves footnote-heavy blocks from the document start
+    to the end so they don't inflate the title area.
+    """
+    footnote_markers = [
+        '∗', '†', '‡', 'Equal contribution',
+        'Work performed', 'Google Brain', 'Google Research',
+    ]
+
+    lines = structured_content.split('\n\n')
+    if not lines:
+        return structured_content
+
+    clean_start: list[str] = []
+    footnotes: list[str] = []
+
+    for i, block in enumerate(lines[:10]):
+        is_footnote = any(marker in block for marker in footnote_markers)
+        word_count = len(block.split())
+        # Only move blocks that are footnote-heavy, long, and not first two
+        if is_footnote and word_count > 30 and i > 1:
+            footnotes.append(f"[FOOTNOTE] {block}")
+        else:
+            clean_start.append(block)
+
+    result_lines = clean_start + lines[10:]
+    if footnotes:
+        result_lines.append("\n[AUTHOR NOTES]")
+        result_lines.extend(footnotes)
+
+    return '\n\n'.join(result_lines)
 
 
 def _is_complete_latex(latex: str) -> bool:
