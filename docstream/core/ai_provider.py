@@ -179,6 +179,61 @@ class GroqProvider(AIProvider):
 
 
 # ---------------------------------------------------------------------------
+# Kimi provider (NVIDIA NIM)
+# ---------------------------------------------------------------------------
+
+
+class KimiProvider(AIProvider):
+    """
+    Kimi K2.5 via NVIDIA NIM (OpenAI-compatible API).
+
+    Used as third fallback after Gemini and Groq.
+    256K token context window, no stated daily quota.
+    Requires NVIDIA_API_KEY from build.nvidia.com.
+    """
+
+    BASE_URL = "https://integrate.api.nvidia.com/v1"
+    MODEL = "moonshotai/kimi-k2.5"
+
+    def __init__(self, api_key: str | None = None) -> None:
+        self.api_key = api_key or os.getenv("NVIDIA_API_KEY")
+        if not self.api_key:
+            raise APIError("NVIDIA_API_KEY not set")
+
+    def complete(self, prompt: str, system: str = "") -> str:
+        """Call Kimi K2.5 via NVIDIA NIM OpenAI-compatible endpoint."""
+        from openai import OpenAI  # lazy import
+
+        client = OpenAI(
+            base_url=self.BASE_URL,
+            api_key=self.api_key,
+        )
+
+        messages: list[dict[str, str]] = []
+        if system:
+            messages.append({"role": "system", "content": system})
+        messages.append({"role": "user", "content": prompt})
+
+        response = client.chat.completions.create(
+            model=self.MODEL,
+            messages=messages,
+            temperature=0.6,
+            max_tokens=8192,
+            extra_body={"thinking": {"type": "disabled"}},
+        )
+
+        result = response.choices[0].message.content
+        if result:
+            logger.info("Kimi K2.5 responded via NVIDIA NIM")
+            return result
+
+        raise APIError("Kimi returned empty response")
+
+    def is_available(self) -> bool:
+        return bool(self.api_key)
+
+
+# ---------------------------------------------------------------------------
 # Ollama provider
 # ---------------------------------------------------------------------------
 
@@ -281,7 +336,7 @@ class AIProviderChain:
 
         chain: list[AIProvider] = []
 
-        for cls in (GeminiProvider, GroqProvider):
+        for cls in (GeminiProvider, GroqProvider, KimiProvider):
             try:
                 chain.append(cls())
             except APIError:
@@ -321,7 +376,7 @@ class AIProviderChain:
 
         raise AIUnavailableError(
             "All AI providers failed or are unavailable. "
-            "Check your API keys (GEMINI_API_KEY / GROQ_API_KEY) "
+            "Check your API keys (GEMINI_API_KEY / GROQ_API_KEY / NVIDIA_API_KEY) "
             "or start an Ollama server. "
             f"Last error: {last_error}"
         )
