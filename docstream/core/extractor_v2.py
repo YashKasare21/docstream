@@ -13,6 +13,7 @@ Key design decisions:
 """
 
 import logging
+import re
 from pathlib import Path
 from typing import Any
 
@@ -61,40 +62,46 @@ def extract_structured(pdf_path: str | Path) -> dict[str, Any]:
         doc.close()
 
 
+def _clean_text(text: str) -> str:
+    """
+    Clean extracted text from PDF span fragmentation.
+
+    Fixes:
+    - Hyphenated line breaks: "multi-\\nhead" → "multihead"
+    - Extra whitespace
+    - Space before punctuation
+    """
+    # Fix hyphenated line breaks (word split across lines)
+    text = re.sub(r'(\w)-\s+(\w)', r'\1\2', text)
+    # Fix multiple spaces
+    text = re.sub(r'  +', ' ', text)
+    # Fix space before punctuation
+    text = re.sub(r'\s+([.,;:!?])', r'\1', text)
+    return text.strip()
+
+
 def _process_document(
     doc: fitz.Document,
     pdf_path: Path,
 ) -> dict[str, Any]:
     """Process an open PDF document into structured content."""
-    # Extract PDF metadata
     metadata = doc.metadata or {}
 
-    # Collect all spans with font info for heading detection
-    all_spans: list[dict[str, Any]] = []
-    pages_data: list[dict[str, Any]] = []
+    # ── Pass 1: collect all font sizes to compute body_font_size ──
+    all_font_sizes: list[float] = []
+    pages_tables: list[dict[str, Any]] = []
 
     for page_num, page in enumerate(doc):
         page_dict = page.get_text("dict")
-        page_spans: list[dict[str, Any]] = []
-
         for block in page_dict.get("blocks", []):
-            if block.get("type") != 0:  # skip non-text blocks
+            if block.get("type") != 0:
                 continue
             for line in block.get("lines", []):
                 for span in line.get("spans", []):
+                    size = round(span.get("size", 12), 1)
                     text = span.get("text", "").strip()
-                    if len(text) < 2:
-                        continue
-                    span_data = {
-                        "text": text,
-                        "font_size": round(span.get("size", 12), 1),
-                        "font_name": span.get("font", ""),
-                        "is_bold": bool(span.get("flags", 0) & 2**4),
-                        "page": page_num + 1,
-                        "bbox": span.get("bbox", (0, 0, 0, 0)),
-                    }
-                    page_spans.append(span_data)
-                    all_spans.append(span_data)
+                    if len(text) > 2:
+                        all_font_sizes.append(size)
 
         # Detect tables on this page
         tables: list[str] = []
@@ -104,68 +111,97 @@ def _process_document(
                 if md:
                     tables.append(md)
         except Exception:
-            pass  # Table detection is best-effort
-
-        pages_data.append({
+            pass
+        pages_tables.append({
             "page_number": page_num + 1,
-            "spans": page_spans,
             "tables": tables,
         })
 
-    # Compute body font size (median of all font sizes)
-    if all_spans:
-        font_sizes = sorted([s["font_size"] for s in all_spans])
-        median_idx = len(font_sizes) // 2
-        body_font_size = font_sizes[median_idx]
+    if all_font_sizes:
+        all_font_sizes.sort()
+        body_font_size = all_font_sizes[len(all_font_sizes) // 2]
     else:
         body_font_size = 12.0
 
-    # Heading threshold: font size > body by at least 1.5pt
-    # OR bold AND font size >= body
     heading_threshold = body_font_size + 1.5
 
-    # Build structure blocks
+    # ── Pass 2: build structure using block-level reconstruction ──
     structure: list[dict[str, Any]] = []
-    current_paragraph_texts: list[str] = []
 
-    for span in all_spans:
-        is_heading = (
-            span["font_size"] >= heading_threshold
-            or (span["is_bold"] and span["font_size"] >= body_font_size + 0.5)
-        )
+    for page_num, page in enumerate(doc):
+        page_dict = page.get_text("dict")
 
-        if is_heading:
-            # Flush current paragraph
-            if current_paragraph_texts:
+        for block in page_dict.get("blocks", []):
+            if block.get("type") != 0:
+                continue
+
+            block_texts: list[str] = []
+            block_font_sizes: list[float] = []
+            block_is_bold: list[bool] = []
+
+            for line in block.get("lines", []):
+                line_text = ""
+                for span in line.get("spans", []):
+                    text = span.get("text", "").strip()
+                    if text:
+                        line_text += text + " "
+                        block_font_sizes.append(
+                            round(span.get("size", 12), 1)
+                        )
+                        block_is_bold.append(
+                            bool(span.get("flags", 0) & 2**4)
+                        )
+                if line_text.strip():
+                    block_texts.append(line_text.strip())
+
+            if not block_texts:
+                continue
+
+            if block_font_sizes:
+                block_font_size = max(
+                    set(block_font_sizes),
+                    key=block_font_sizes.count,
+                )
+                is_bold = (
+                    block_is_bold.count(True) > len(block_is_bold) / 2
+                )
+            else:
+                block_font_size = 12.0
+                is_bold = False
+
+            block_text = _clean_text(" ".join(block_texts))
+
+            if len(block_text) < 2:
+                continue
+
+            is_heading = (
+                block_font_size >= heading_threshold
+                or (
+                    is_bold
+                    and block_font_size >= body_font_size + 0.5
+                    and len(block_text) < 150
+                )
+            )
+
+            if is_heading:
+                structure.append({
+                    "type": "heading",
+                    "text": block_text,
+                    "font_size": block_font_size,
+                    "level": _estimate_heading_level(
+                        block_font_size, body_font_size
+                    ),
+                    "page": page_num + 1,
+                })
+            else:
                 structure.append({
                     "type": "paragraph",
-                    "text": " ".join(current_paragraph_texts),
-                    "page": span["page"],
+                    "text": block_text,
+                    "page": page_num + 1,
                 })
-                current_paragraph_texts = []
-
-            structure.append({
-                "type": "heading",
-                "text": span["text"],
-                "font_size": span["font_size"],
-                "level": _estimate_heading_level(
-                    span["font_size"], body_font_size
-                ),
-                "page": span["page"],
-            })
-        else:
-            current_paragraph_texts.append(span["text"])
-
-    # Flush remaining paragraph
-    if current_paragraph_texts:
-        structure.append({
-            "type": "paragraph",
-            "text": " ".join(current_paragraph_texts),
-            "page": all_spans[-1]["page"] if all_spans else 1,
-        })
 
     # Add tables to structure
-    for page_data in pages_data:
+    for page_data in pages_tables:
         for table_md in page_data["tables"]:
             structure.append({
                 "type": "table",

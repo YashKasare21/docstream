@@ -101,7 +101,7 @@ def generate_latex(
             # Shorten the prompt for retry
             prompt = _build_prompt(
                 document, skeleton, instructions,
-                template, max_chars=3000,
+                template, max_chars=25000,
             )
 
     if not latex:
@@ -179,7 +179,7 @@ def _build_prompt(
     skeleton: str,
     instructions: str,
     template: str,
-    max_chars: int = 6000,
+    max_chars: int = 50000,
 ) -> str:
     """Build the user prompt for LaTeX generation."""
     # Prepare structured content representation
@@ -209,13 +209,13 @@ def _build_prompt(
 
     structured_content = "\n\n".join(content_parts)
 
-    # Truncate if too long (preserve first 70%, last 30%)
+    # Truncate if too long (preserve first 80%, last 20%)
     if len(structured_content) > max_chars:
-        first_part = int(max_chars * 0.7)
+        first_part = int(max_chars * 0.8)
         last_part = max_chars - first_part
         structured_content = (
             structured_content[:first_part]
-            + "\n\n[... content truncated for length ...]\n\n"
+            + "\n\n[... middle section truncated ...]\n\n"
             + structured_content[-last_part:]
         )
 
@@ -240,6 +240,13 @@ DOCUMENT CONTENT TO CONVERT:
 ═══════════════════════════════
 YOUR TASK:
 ═══════════════════════════════
+CRITICAL REQUIREMENT:
+- Use the ACTUAL TEXT provided above for all sections
+- Do NOT summarize or paraphrase — use the real content
+- Do NOT write placeholder text like "content was truncated"
+- Every section must contain the real extracted text
+- If content seems incomplete, use what is available
+
 Replace every <<PLACEHOLDER>> in the skeleton with the \
 appropriate content from the document above.
 
