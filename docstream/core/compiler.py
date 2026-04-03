@@ -57,6 +57,11 @@ def compile_latex(
         # Write LaTeX file
         tex_file.write_text(latex_content, encoding="utf-8")
 
+        # Save .tex to output_dir immediately (for debugging)
+        # This ensures .tex is available even if compilation fails
+        output_tex = output_dir / f"{filename}.tex"
+        output_tex.write_text(latex_content, encoding="utf-8")
+
         # Run XeLaTeX twice
         errors: list[str] = []
         for run in range(2):
@@ -72,14 +77,11 @@ def compile_latex(
             error_summary = "\n".join(errors[:5]) if errors else "Unknown error"
             raise CompilationError(
                 f"XeLaTeX failed to produce PDF.\n"
-                f"Errors found:\n{error_summary}"
+                f"Errors found:\n{error_summary}\n"
+                f"LaTeX saved to: {output_tex}"
             )
 
-        # Copy outputs to destination
-        output_tex = output_dir / f"{filename}.tex"
         output_pdf = output_dir / f"{filename}.pdf"
-
-        output_tex.write_text(latex_content, encoding="utf-8")
         shutil.copy2(str(pdf_file), str(output_pdf))
 
         logger.info(

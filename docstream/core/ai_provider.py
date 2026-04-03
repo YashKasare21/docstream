@@ -89,7 +89,7 @@ class GeminiProvider(AIProvider):
             try:
                 config = types.GenerateContentConfig(
                     temperature=0.1,
-                    max_output_tokens=8192,
+                    max_output_tokens=16384,
                 )
 
                 if system:

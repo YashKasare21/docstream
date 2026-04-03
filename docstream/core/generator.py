@@ -77,15 +77,32 @@ def generate_latex(
 
     system_prompt = _build_system_prompt()
 
-    try:
-        raw_response = ai_provider.complete(prompt, system_prompt)
-    except Exception as e:
-        raise StructuringError(
-            f"AI provider failed: {e}"
-        )
+    # Try up to 2 times if output is truncated
+    latex = ""
+    for attempt in range(2):
+        try:
+            raw_response = ai_provider.complete(prompt, system_prompt)
+        except Exception as e:
+            raise StructuringError(
+                f"AI provider failed: {e}"
+            )
 
-    # Extract and validate LaTeX from response
-    latex = _extract_latex(raw_response)
+        latex = _extract_latex(raw_response)
+
+        # Check if LaTeX is complete
+        if _is_complete_latex(latex):
+            break
+
+        if attempt == 0:
+            logger.warning(
+                "LaTeX appears truncated, retrying with "
+                "shorter content..."
+            )
+            # Shorten the prompt for retry
+            prompt = _build_prompt(
+                document, skeleton, instructions,
+                template, max_chars=3000,
+            )
 
     if not latex:
         raise StructuringError(
@@ -140,9 +157,15 @@ STRICT RULES:
 5. Every \\begin{} must have a matching \\end{}
 6. Escape special characters: & % $ # _ { } ~ ^ \\
 7. Use the exact document class specified in the template
-8. The output must compile with XeLaTeX without errors
-9. Preserve ALL content from the source document
-10. Do not truncate or summarize — include everything"""
+8. The output MUST compile with XeLaTeX without errors
+9. CRITICAL: You MUST include \\end{document} as the \
+very last line. Never truncate the output.
+10. CRITICAL: If content is long, summarize sections \
+rather than stopping mid-document. A complete \
+document with summarized content is better than \
+an incomplete document with full content.
+11. Do not use \\input{} or \\include{} commands
+12. Do not reference external image files"""
 
 
 def _build_prompt(
@@ -150,6 +173,7 @@ def _build_prompt(
     skeleton: str,
     instructions: str,
     template: str,
+    max_chars: int = 6000,
 ) -> str:
     """Build the user prompt for LaTeX generation."""
     # Prepare structured content representation
@@ -179,14 +203,14 @@ def _build_prompt(
 
     structured_content = "\n\n".join(content_parts)
 
-    # Truncate if too long (preserve first and last parts)
-    max_chars = 12000
+    # Truncate if too long (preserve first 70%, last 30%)
     if len(structured_content) > max_chars:
-        half = max_chars // 2
+        first_part = int(max_chars * 0.7)
+        last_part = max_chars - first_part
         structured_content = (
-            structured_content[:half]
-            + "\n\n[... content continues ...]\n\n"
-            + structured_content[-half:]
+            structured_content[:first_part]
+            + "\n\n[... content truncated for length ...]\n\n"
+            + structured_content[-last_part:]
         )
 
     prompt = f"""Convert the following document content into a \
@@ -231,6 +255,30 @@ section or empty string if none found
 Return the complete LaTeX document now:"""
 
     return prompt
+
+
+def _is_complete_latex(latex: str) -> bool:
+    """
+    Check if LaTeX document is complete.
+
+    Returns False if document appears truncated.
+    """
+    if not latex:
+        return False
+
+    # Must have both begin and end document
+    has_begin = "\\begin{document}" in latex
+    has_end = "\\end{document}" in latex
+
+    if not has_begin or not has_end:
+        return False
+
+    # The \end{document} must be near the end (within last 200 chars)
+    end_pos = latex.rfind("\\end{document}")
+    if len(latex) - end_pos > 200:
+        return False
+
+    return True
 
 
 def _extract_latex(response: str) -> str:
