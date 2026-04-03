@@ -35,6 +35,8 @@ def generate_latex(
 
     Uses AI to fill a LaTeX template skeleton with the
     content extracted from the source document.
+    For long documents (>15 000 chars), uses a two-call split
+    strategy to avoid output truncation.
 
     Args:
         document: Structured document dict from extract_structured()
@@ -55,72 +57,39 @@ def generate_latex(
     if template not in VALID_TEMPLATES:
         raise TemplateError(
             f"Unknown template: '{template}'. "
-            f"Valid templates: {', '.join(sorted(VALID_TEMPLATES))}"
+            f"Valid: {', '.join(sorted(VALID_TEMPLATES))}"
         )
 
-    # Load template skeleton and instructions
     skeleton = _load_skeleton(template)
     instructions = _load_instructions(template)
 
-    # Build the AI prompt
-    prompt = _build_prompt(document, skeleton, instructions, template)
-
-    # Get AI provider
     if ai_provider is None:
         ai_provider = AIProviderChain()
 
-    # Call AI
-    logger.info(
-        f"Generating LaTeX for template '{template}' "
-        f"({len(document.get('structure', []))} blocks)"
-    )
-
     system_prompt = _build_system_prompt()
 
-    # Try up to 2 times if output is truncated
-    latex = ""
-    for attempt in range(2):
-        try:
-            raw_response = ai_provider.complete(prompt, system_prompt)
-        except Exception as e:
-            raise StructuringError(
-                f"AI provider failed: {e}"
-            )
-
-        latex = _extract_latex(raw_response)
-
-        # Check if LaTeX is complete
-        if _is_complete_latex(latex):
-            break
-
-        if attempt == 0:
-            logger.warning(
-                "LaTeX appears truncated, retrying with "
-                "shorter content..."
-            )
-            # Shorten the prompt for retry
-            prompt = _build_prompt(
-                document, skeleton, instructions,
-                template, max_chars=25000,
-            )
-
-    if not latex:
-        raise StructuringError(
-            "AI returned empty response. "
-            "Check AI provider keys are valid."
-        )
-
-    if "\\documentclass" not in latex:
-        raise StructuringError(
-            "AI response does not contain valid LaTeX. "
-            f"Response starts with: {latex[:200]}"
-        )
+    # Build full content string once
+    content_parts = _build_content_parts(document)
+    full_content = '\n\n'.join(content_parts)
+    full_content = _preprocess_content(full_content)
 
     logger.info(
-        f"Generated {len(latex)} characters of LaTeX"
+        f"Generating LaTeX for template '{template}' "
+        f"({len(document.get('structure', []))} blocks, "
+        f"{len(full_content)} chars)"
     )
 
-    return latex
+    if len(full_content) <= 15000:
+        return _generate_single(
+            full_content, skeleton, instructions,
+            template, system_prompt, ai_provider,
+        )
+
+    logger.info("Document is long — using split generation strategy")
+    return _generate_split(
+        full_content, skeleton, instructions,
+        template, system_prompt, ai_provider,
+    )
 
 
 def _load_skeleton(template: str) -> str:
@@ -166,18 +135,21 @@ document with summarized content is better than \
 an incomplete document with full content.
 11. Do not use \\input{} or \\include{} commands
 12. Do not reference external image files
-13. For references: collect all [REF] lines from the content \
-and format as thebibliography. Each [REF] entry becomes a \
-\\bibitem. Example: [REF] [1] Vaswani et al., "Attention is \
-All You Need" becomes \\bibitem{ref1} Vaswani et al., \
-``Attention is All You Need,'' 2017.
-Use \\cite{ref1}, \\cite{ref2} etc. in text where citations \
-appear as [?] or [number]. NEVER use enumerate or itemize \
-for references.
-14. CITATION HANDLING: When you see [?] in the text, replace \
-with \\cite{refN} where N matches the corresponding reference \
-number. If no bibliography entries exist, replace [?] with \
-\\textsuperscript{N} using sequential numbers.
+13. CITATIONS — This is critical:
+The document may contain [?] where citations should be.
+The document also contains [REF] lines with the actual references.
+STEP 1: Number the [REF] entries in order: ref1, ref2, ref3...
+STEP 2: Replace [?] placeholders with \\cite{ref1}, \\cite{ref2} \
+in the ORDER they appear in text. \
+First [?] → \\cite{ref1}, second [?] → \\cite{ref2}, etc.
+STEP 3: Format the bibliography as: \
+\\begin{thebibliography}{99} \
+\\bibitem{ref1} First reference text. \
+\\bibitem{ref2} Second reference text. \
+\\end{thebibliography}
+If NO [REF] entries exist but [?] are present: replace [?] \
+with \\textsuperscript{N} where N increments.
+14. NEVER leave [?] in the output. Always resolve them.
 15. Never create enumerate lists with more than 15 items. \
 Use itemize (bullet points) for longer lists.
 16. Do not use \\alph, \\Alph counters.
@@ -200,23 +172,14 @@ under 20 words. Example: \
 \\author{John Smith\\thanks{Google Brain}}"""
 
 
-def _build_prompt(
-    document: dict[str, Any],
-    skeleton: str,
-    instructions: str,
-    template: str,
-    max_chars: int = 50000,
-) -> str:
-    """Build the user prompt for LaTeX generation."""
-    # Prepare structured content representation
+def _build_content_parts(document: dict[str, Any]) -> list[str]:
+    """Extract and format content parts from a document structure dict."""
     content_parts: list[str] = []
 
-    # Add metadata
     meta = document.get("metadata", {})
     if meta.get("author"):
         content_parts.append(f"[AUTHOR]: {meta['author']}")
 
-    # Add structure blocks
     for block in document.get("structure", []):
         block_type = block.get("type", "paragraph")
         text = block.get("text", "").strip()
@@ -235,22 +198,17 @@ def _build_prompt(
         else:
             content_parts.append(text)
 
-    structured_content = "\n\n".join(content_parts)
+    return content_parts
 
-    # Preprocess to move footnotes away from title area
-    structured_content = _preprocess_content(structured_content)
 
-    # Truncate if too long (preserve first 80%, last 20%)
-    if len(structured_content) > max_chars:
-        first_part = int(max_chars * 0.8)
-        last_part = max_chars - first_part
-        structured_content = (
-            structured_content[:first_part]
-            + "\n\n[... middle section truncated ...]\n\n"
-            + structured_content[-last_part:]
-        )
-
-    prompt = f"""Convert the following document content into a \
+def _build_prompt_from_content(
+    content: str,
+    skeleton: str,
+    instructions: str,
+    template: str,  # noqa: ARG001 — reserved for future per-template tuning
+) -> str:
+    """Build a full generation prompt from a pre-processed content string."""
+    return f"""Convert the following document content into a \
 complete LaTeX document using the provided template.
 
 ═══════════════════════════════
@@ -266,39 +224,240 @@ TEMPLATE INSTRUCTIONS:
 ═══════════════════════════════
 DOCUMENT CONTENT TO CONVERT:
 ═══════════════════════════════
-{structured_content}
+{content}
 
 ═══════════════════════════════
 YOUR TASK:
 ═══════════════════════════════
-CRITICAL REQUIREMENT:
-- Use the ACTUAL TEXT provided above for all sections
-- Do NOT summarize or paraphrase — use the real content
-- Do NOT write placeholder text like "content was truncated"
-- Every section must contain the real extracted text
-- If content seems incomplete, use what is available
+CRITICAL REQUIREMENTS:
+- Use the ACTUAL TEXT provided — do NOT summarize
+- Include ALL sections from the content above
+- Every section must contain real extracted text
+- Do not write placeholder text like "content truncated"
+- Properly escape special characters: & % $ # _ {{}} ~ ^ \\
+- Citations [1],[2] etc. should become \\cite{{ref1}},\\cite{{ref2}}
+- [?] placeholders: replace with \\cite{{refN}} sequentially
 
-Replace every <<PLACEHOLDER>> in the skeleton with the \
-appropriate content from the document above.
-
-Rules:
-- Replace <<TITLE>> with the document title
-- Replace <<ABSTRACT>> with the abstract text
-- Replace <<SECTIONS>> with properly formatted LaTeX sections
-- Replace <<BIBLIOGRAPHY_BLOCK>> with formatted references
-- For IEEE: replace <<AUTHORS_BLOCK>> with IEEEauthorblock format
-- For IEEE: replace <<KEYWORDS>> with comma-separated keywords
-- For IEEE: replace <<ACKNOWLEDGMENT_BLOCK>> with acknowledgment \
-section or empty string if none found
-- For Report: replace <<AUTHOR>> with author name
-- For Report: replace <<DATE>> with date or \\today
-- Preserve ALL content — do not skip any sections
-- Format tables using the format specified in instructions
-- Every special character must be properly escaped
+Replace every <<PLACEHOLDER>> with the appropriate content.
+- <<TITLE>> → document title
+- <<ABSTRACT>> → abstract text
+- <<SECTIONS>> → properly formatted LaTeX sections
+- <<BIBLIOGRAPHY_BLOCK>> → formatted references
+- IEEE: <<AUTHORS_BLOCK>>, <<KEYWORDS>>, <<ACKNOWLEDGMENT_BLOCK>>
+- Report: <<AUTHOR>>, <<DATE>> (use \\today if not found)
 
 Return the complete LaTeX document now:"""
 
-    return prompt
+
+def _build_prompt(
+    document: dict[str, Any],
+    skeleton: str,
+    instructions: str,
+    template: str,
+    max_chars: int = 50000,
+) -> str:
+    """Build the user prompt for LaTeX generation (legacy single-call path)."""
+    content_parts = _build_content_parts(document)
+    structured_content = "\n\n".join(content_parts)
+    structured_content = _preprocess_content(structured_content)
+
+    # Truncate if too long (preserve first 80%, last 20%)
+    if len(structured_content) > max_chars:
+        first_part = int(max_chars * 0.8)
+        last_part = max_chars - first_part
+        structured_content = (
+            structured_content[:first_part]
+            + "\n\n[... middle section truncated ...]\n\n"
+            + structured_content[-last_part:]
+        )
+
+    return _build_prompt_from_content(
+        structured_content, skeleton, instructions, template
+    )
+
+
+def _generate_single(
+    full_content: str,
+    skeleton: str,
+    instructions: str,
+    template: str,
+    system_prompt: str,
+    ai_provider: Any,
+) -> str:
+    """Generate LaTeX in a single AI call."""
+    from docstream.exceptions import StructuringError
+
+    prompt = _build_prompt_from_content(
+        full_content, skeleton, instructions, template
+    )
+
+    raw = ""
+    for attempt in range(2):
+        try:
+            raw = ai_provider.complete(prompt, system_prompt)
+        except Exception as e:
+            raise StructuringError(f"AI provider failed: {e}")
+
+        latex = _extract_latex(raw)
+
+        if _is_complete_latex(latex):
+            logger.info(f"Generated {len(latex)} chars of LaTeX")
+            return latex
+
+        if attempt == 0:
+            logger.warning("LaTeX truncated, retrying with shorter content")
+            short_content = full_content[:8000]
+            prompt = _build_prompt_from_content(
+                short_content, skeleton, instructions, template
+            )
+
+    latex = _extract_latex(raw)
+    if not latex or "\\documentclass" not in latex:
+        raise StructuringError(
+            "AI returned invalid LaTeX. "
+            f"Response starts with: {raw[:200]}"
+        )
+    return latex
+
+
+def _generate_split(
+    full_content: str,
+    skeleton: str,
+    instructions: str,
+    template: str,
+    system_prompt: str,
+    ai_provider: Any,
+) -> str:
+    """
+    Generate LaTeX in two AI calls for long documents.
+
+    Call 1: document header + first half of content
+    Call 2: remaining sections + bibliography
+    Merge: combine both into one complete document
+    """
+    from docstream.exceptions import StructuringError
+
+    # Split at midpoint, preferring a heading boundary
+    midpoint = len(full_content) // 2
+    split_pos = midpoint
+
+    search_area = full_content[midpoint:midpoint + 3000]
+    heading_match = re.search(r'\n#{1,3} ', search_area)
+    if heading_match:
+        split_pos = midpoint + heading_match.start()
+
+    first_half = full_content[:split_pos].strip()
+    second_half = full_content[split_pos:].strip()
+
+    logger.info(
+        f"Split: {len(first_half)} chars + {len(second_half)} chars"
+    )
+
+    # ── Call 1: full document structure with first half ──
+    prompt1 = (
+        f"Convert this document to LaTeX using the template below.\n"
+        f"This is PART 1 of 2. Generate the COMPLETE document structure "
+        f"including: documentclass, packages, title, abstract, and "
+        f"ALL sections from the content below. End with a placeholder "
+        f"comment: % BIBLIOGRAPHY_PLACEHOLDER\n\n"
+        f"{skeleton}\n\n"
+        f"INSTRUCTIONS:\n{instructions}\n\n"
+        f"DOCUMENT CONTENT (Part 1 — main sections):\n{first_half}\n\n"
+        f"CRITICAL:\n"
+        f"- Generate complete LaTeX from \\documentclass to the sections\n"
+        f"- Include ALL sections from the content above\n"
+        f"- End with: % BIBLIOGRAPHY_PLACEHOLDER\n"
+        f"- Do NOT write \\end{{document}} yet\n"
+        f"- Return only LaTeX, no explanation"
+    )
+
+    try:
+        raw1 = ai_provider.complete(prompt1, system_prompt)
+        latex_part1 = _extract_latex_partial(raw1)
+    except Exception as e:
+        raise StructuringError(f"Part 1 generation failed: {e}")
+
+    # ── Call 2: remaining sections + bibliography ──
+    prompt2 = (
+        f"Continue the LaTeX document. Generate the REMAINING "
+        f"sections and the bibliography.\n\n"
+        f"REMAINING CONTENT (Part 2):\n{second_half}\n\n"
+        f"INSTRUCTIONS:\n{instructions}\n\n"
+        f"Generate ONLY:\n"
+        f"1. Any remaining \\section{{}} content from part 2\n"
+        f"2. The bibliography (\\begin{{thebibliography}} block)\n"
+        f"3. \\end{{document}}\n\n"
+        f"Do NOT repeat documentclass, packages, title, or abstract.\n"
+        f"Start directly with remaining sections.\n"
+        f"Return only LaTeX, no explanation."
+    )
+
+    try:
+        raw2 = ai_provider.complete(prompt2, system_prompt)
+        latex_part2 = _extract_latex_continuation(raw2)
+    except Exception as e:
+        logger.warning(f"Part 2 generation failed: {e}")
+        latex_part2 = "\\end{document}"
+
+    merged = _merge_latex_parts(latex_part1, latex_part2)
+
+    if "\\end{document}" not in merged:
+        merged += "\n\\end{document}"
+
+    logger.info(f"Split generation complete: {len(merged)} chars")
+    return merged
+
+
+def _extract_latex_partial(response: str) -> str:
+    """Extract partial LaTeX (no \\end{document} expected)."""
+    response = re.sub(r'```latex\s*', '', response)
+    response = re.sub(r'```\s*', '', response)
+    response = response.strip()
+
+    start = response.find('\\documentclass')
+    if start == -1:
+        return response
+
+    latex = response[start:]
+    # Remove any \end{document} that snuck in
+    latex = re.sub(r'\\end\{document\}', '', latex)
+    return latex.rstrip()
+
+
+def _extract_latex_continuation(response: str) -> str:
+    """Extract continuation LaTeX (sections + bibliography only)."""
+    response = re.sub(r'```latex\s*', '', response)
+    response = re.sub(r'```\s*', '', response)
+    response = response.strip()
+
+    # If AI accidentally included a full preamble, strip it
+    if '\\documentclass' in response:
+        section_match = re.search(r'\\section\{', response)
+        biblio_match = re.search(r'\\begin\{thebibliography\}', response)
+
+        start = None
+        if section_match:
+            start = section_match.start()
+        elif biblio_match:
+            start = biblio_match.start()
+
+        if start is not None:
+            response = response[start:]
+
+    return response.strip()
+
+
+def _merge_latex_parts(part1: str, part2: str) -> str:
+    """Merge two LaTeX parts into one complete document."""
+    # Remove placeholder comment from part 1
+    part1 = re.sub(r'%\s*BIBLIOGRAPHY_PLACEHOLDER.*', '', part1)
+    part1 = part1.rstrip()
+
+    # Ensure part 2 ends with \end{document}
+    if '\\end{document}' not in part2:
+        part2 = part2.rstrip() + '\n\\end{document}'
+
+    return part1 + '\n\n' + part2
 
 
 def _preprocess_content(structured_content: str) -> str:

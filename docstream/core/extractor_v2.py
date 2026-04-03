@@ -62,6 +62,21 @@ def extract_structured(pdf_path: str | Path) -> dict[str, Any]:
         doc.close()
 
 
+_LIGATURE_FIXES = {
+    '\ufb00': 'ff',
+    '\ufb01': 'fi',
+    '\ufb02': 'fl',
+    '\ufb03': 'ffi',
+    '\ufb04': 'ffl',
+    '\u2019': "'",
+    '\u2018': "'",
+    '\u201c': '"',
+    '\u201d': '"',
+    '\u2013': '--',
+    '\u2014': '---',
+}
+
+
 def _clean_text(text: str) -> str:
     """
     Clean extracted text from PDF span fragmentation.
@@ -70,6 +85,8 @@ def _clean_text(text: str) -> str:
     - Hyphenated line breaks: "multi-\\nhead" → "multihead"
     - Extra whitespace
     - Space before punctuation
+    - Common PDF ligature encoding issues (fi, fl, ff, etc.)
+    - Smart quotes and dashes
     """
     # Fix hyphenated line breaks (word split across lines)
     text = re.sub(r'(\w)-\s+(\w)', r'\1\2', text)
@@ -77,6 +94,9 @@ def _clean_text(text: str) -> str:
     text = re.sub(r'  +', ' ', text)
     # Fix space before punctuation
     text = re.sub(r'\s+([.,;:!?])', r'\1', text)
+    # Fix ligatures and smart punctuation
+    for char, replacement in _LIGATURE_FIXES.items():
+        text = text.replace(char, replacement)
     return text.strip()
 
 

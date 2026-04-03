@@ -59,6 +59,28 @@ If acknowledgments found:
 Acknowledgment text here.
 Otherwise: leave empty (empty string)
 
+TABLE HANDLING:
+When you encounter [TABLE] ... [/TABLE] in the content, convert
+the markdown table to proper LaTeX for IEEE format:
+\begin{table}[htbp]
+\caption{Table Title}
+\begin{center}
+\begin{tabular}{|l|r|r|}
+\hline
+\textbf{Column 1} & \textbf{Column 2} & \textbf{Column 3} \\
+\hline
+value & value & value \\
+\hline
+\end{tabular}
+\end{center}
+\label{tab:1}
+\end{table}
+Rules:
+- Count columns from the markdown header row
+- Convert | col1 | col2 | to col1 & col2 \\
+- Add \caption{} using nearby text as context for the title
+- Place table near where it is referenced in the text
+
 CITATION HANDLING:
 The extracted text may contain [?] where citations should appear.
 When you see [?] in the text:
