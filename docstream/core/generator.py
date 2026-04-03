@@ -239,23 +239,54 @@ def _extract_latex(response: str) -> str:
 
     Handles cases where AI wraps output in markdown fences
     or adds explanation text before/after the LaTeX.
+    Also removes figure references we cannot fulfill.
     """
     # Remove markdown code fences
     response = re.sub(r'```latex\s*', '', response)
     response = re.sub(r'```\s*', '', response)
     response = response.strip()
 
-    # Find the start of LaTeX (\\documentclass)
+    # Find LaTeX boundaries
     start = response.find('\\documentclass')
-
     if start == -1:
         return response  # Return as-is, validation will catch it
 
-    # Find the end of LaTeX (\\end{document})
     end_marker = '\\end{document}'
     end = response.rfind(end_marker)
-
     if end == -1:
-        return response[start:]  # Take from documentclass to end
+        latex = response[start:]
+    else:
+        latex = response[start:end + len(end_marker)]
 
-    return response[start:end + len(end_marker)]
+    # Post-process: handle figure references
+    latex = _fix_figure_references(latex)
+
+    return latex
+
+
+def _fix_figure_references(latex: str) -> str:
+    """
+    Fix figure references that would cause compilation errors.
+
+    Replaces \\includegraphics{...} with a placeholder box
+    when the referenced file does not exist locally.
+    This prevents compilation failures from missing image files.
+    """
+    def replace_includegraphics(match: re.Match) -> str:
+        """Replace a single \\includegraphics with a visible placeholder."""
+        filename = match.group(1)
+        display_name = filename.replace('{', '').replace('}', '')
+        display_name = display_name.split('/')[-1][:30]
+        return (
+            r'\fbox{\parbox{0.4\textwidth}{'
+            r'\centering\small[Figure: ' + display_name + r']}}'
+        )
+
+    # Match \includegraphics[options]{filename} and \includegraphics{filename}
+    latex = re.sub(
+        r'\\includegraphics(?:\[[^\]]*\])?\{([^}]+)\}',
+        replace_includegraphics,
+        latex,
+    )
+
+    return latex

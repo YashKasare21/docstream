@@ -52,7 +52,7 @@ class AIProvider:
 
 
 class GeminiProvider(AIProvider):
-    """Calls Google Gemini 1.5 Flash via ``google-generativeai``."""
+    """Calls Google Gemini via ``google-generativeai`` with model fallback."""
 
     def __init__(self, api_key: str | None = None) -> None:
         self.api_key = api_key or os.getenv("GEMINI_API_KEY")
@@ -60,16 +60,64 @@ class GeminiProvider(AIProvider):
             raise APIError("GEMINI_API_KEY not set")
 
     def complete(self, prompt: str, system: str = "") -> str:
-        """Call Gemini 1.5 Flash and return the response text."""
+        """Call Gemini API with current model names.
+
+        Tries models in order of preference, falling back on failure.
+        """
         import google.generativeai as genai  # lazy import
 
         genai.configure(api_key=self.api_key)
-        model = genai.GenerativeModel(
-            model_name="gemini-1.5-flash",
-            system_instruction=system or None,
+
+        # Try models in order of preference
+        models_to_try = [
+            "gemini-2.0-flash",
+            "gemini-2.0-flash-lite",
+            "gemini-1.5-flash-latest",
+            "gemini-1.5-flash",
+            "gemini-pro",
+        ]
+
+        last_error = None
+        for model_name in models_to_try:
+            try:
+                model = genai.GenerativeModel(
+                    model_name=model_name,
+                    system_instruction=system if system else None,
+                )
+                response = model.generate_content(
+                    prompt,
+                    generation_config={
+                        "temperature": 0.1,
+                        "max_output_tokens": 8192,
+                    },
+                )
+                if response.text:
+                    logger.info(
+                        f"Gemini responded using model: {model_name}"
+                    )
+                    return response.text
+            except Exception as e:
+                last_error = e
+                logger.debug(f"Model {model_name} failed: {e}")
+                continue
+
+        raise APIError(
+            f"All Gemini models failed. Last error: {last_error}"
         )
-        response = model.generate_content(prompt)
-        return response.text
+
+    def list_available_models(self) -> list[str]:
+        """List available Gemini models for debugging."""
+        import google.generativeai as genai  # lazy import
+
+        genai.configure(api_key=self.api_key)
+        try:
+            models = genai.list_models()
+            return [
+                m.name for m in models
+                if "generateContent" in m.supported_generation_methods
+            ]
+        except Exception as e:
+            return [f"Error listing models: {e}"]
 
     def is_available(self) -> bool:
         return bool(self.api_key)
@@ -99,7 +147,7 @@ class GroqProvider(AIProvider):
         messages.append({"role": "user", "content": prompt})
 
         response = client.chat.completions.create(
-            model="llama-3.1-70b-versatile",
+            model="llama-3.3-70b-versatile",
             messages=messages,
             temperature=0.1,
             max_tokens=4096,
@@ -118,8 +166,9 @@ class GroqProvider(AIProvider):
 class OllamaProvider(AIProvider):
     """Connects to an Ollama instance (local or Colab via ngrok).
 
-    Uses the official ``ollama`` Python package which supports a custom
-    ``host`` parameter for ngrok tunnels.
+    Uses direct ``httpx`` HTTP calls to the Ollama REST API so that
+    the ``ollama`` Python package is not required, and error messages
+    are clear about whether the server is unreachable vs. timed out.
     """
 
     def __init__(
@@ -127,31 +176,54 @@ class OllamaProvider(AIProvider):
         base_url: str | None = None,
         model: str = "llama3.1:8b",
     ) -> None:
-        self.base_url = base_url or os.getenv(
-            "OLLAMA_BASE_URL", "http://localhost:11434"
-        )
+        self.base_url = (
+            base_url or os.getenv("OLLAMA_BASE_URL", "http://localhost:11434")
+        ).rstrip("/")
         self.model = model
 
     def complete(self, prompt: str, system: str = "") -> str:
-        """Call the Ollama API and return the response text."""
-        import ollama  # lazy import
+        """Call the Ollama /api/chat endpoint and return the response text."""
+        import httpx  # lazy import — available via FastAPI/Starlette
 
-        client = ollama.Client(host=self.base_url)
         messages: list[dict[str, str]] = []
         if system:
             messages.append({"role": "system", "content": system})
         messages.append({"role": "user", "content": prompt})
 
-        response = client.chat(model=self.model, messages=messages)
-        return response.message.content
+        try:
+            resp = httpx.post(
+                f"{self.base_url}/api/chat",
+                json={"model": self.model, "messages": messages, "stream": False},
+                timeout=120.0,
+                headers={"ngrok-skip-browser-warning": "true"},
+            )
+            resp.raise_for_status()
+            return resp.json()["message"]["content"]
+        except httpx.ConnectError as exc:
+            raise APIError(
+                f"Ollama unreachable at {self.base_url}: {exc}"
+            ) from exc
+        except httpx.TimeoutException as exc:
+            raise APIError("Ollama timed out after 120 s.") from exc
+        except httpx.HTTPStatusError as exc:
+            raise APIError(
+                f"Ollama HTTP {exc.response.status_code}: "
+                f"{exc.response.text[:200]}"
+            ) from exc
 
     def is_available(self) -> bool:
-        """Return True if the Ollama server is reachable."""
-        try:
-            import ollama
+        """Return True if Ollama is reachable and the model is loaded."""
+        import httpx
 
-            ollama.Client(host=self.base_url).list()
-            return True
+        try:
+            resp = httpx.get(
+                f"{self.base_url}/api/tags",
+                timeout=5.0,
+                headers={"ngrok-skip-browser-warning": "true"},
+            )
+            resp.raise_for_status()
+            models = [m["name"] for m in resp.json().get("models", [])]
+            return any(self.model in m for m in models)
         except Exception:
             return False
 
