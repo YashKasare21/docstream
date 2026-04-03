@@ -335,82 +335,159 @@ def _generate_split(
     ai_provider: Any,
 ) -> str:
     """
-    Generate LaTeX in two AI calls for long documents.
+    Generate LaTeX in 2 or 3 AI calls for long documents.
 
-    Call 1: document header + first half of content
-    Call 2: remaining sections + bibliography
-    Merge: combine both into one complete document
+    Chunks are capped at ~8 000 chars to stay within Groq's
+    free-tier token limit (~6 000 tokens per chunk).
     """
-    from docstream.exceptions import StructuringError
+    CHUNK_SIZE = 8000
 
-    # Split at midpoint, preferring a heading boundary
-    midpoint = len(full_content) // 2
-    split_pos = midpoint
-
-    search_area = full_content[midpoint:midpoint + 3000]
-    heading_match = re.search(r'\n#{1,3} ', search_area)
-    if heading_match:
-        split_pos = midpoint + heading_match.start()
-
-    first_half = full_content[:split_pos].strip()
-    second_half = full_content[split_pos:].strip()
+    n_parts = 3 if len(full_content) > CHUNK_SIZE * 2 else 2
+    chunks = _split_at_headings(full_content, n_parts)
 
     logger.info(
-        f"Split: {len(first_half)} chars + {len(second_half)} chars"
+        f"Split into {len(chunks)} chunks: "
+        f"{[len(c) for c in chunks]} chars"
     )
 
-    # ── Call 1: full document structure with first half ──
-    prompt1 = (
-        f"Convert this document to LaTeX using the template below.\n"
-        f"This is PART 1 of 2. Generate the COMPLETE document structure "
-        f"including: documentclass, packages, title, abstract, and "
-        f"ALL sections from the content below. End with a placeholder "
-        f"comment: % BIBLIOGRAPHY_PLACEHOLDER\n\n"
-        f"{skeleton}\n\n"
-        f"INSTRUCTIONS:\n{instructions}\n\n"
-        f"DOCUMENT CONTENT (Part 1 — main sections):\n{first_half}\n\n"
-        f"CRITICAL:\n"
-        f"- Generate complete LaTeX from \\documentclass to the sections\n"
-        f"- Include ALL sections from the content above\n"
-        f"- End with: % BIBLIOGRAPHY_PLACEHOLDER\n"
-        f"- Do NOT write \\end{{document}} yet\n"
-        f"- Return only LaTeX, no explanation"
+    part1_latex = _generate_part1(
+        chunks[0], skeleton, instructions,
+        template, system_prompt, ai_provider,
     )
 
-    try:
-        raw1 = ai_provider.complete(prompt1, system_prompt)
-        latex_part1 = _extract_latex_partial(raw1)
-    except Exception as e:
-        raise StructuringError(f"Part 1 generation failed: {e}")
+    continuation_parts: list[str] = []
+    for i, chunk in enumerate(chunks[1:], start=2):
+        try:
+            part = _generate_continuation(
+                chunk, i, len(chunks), system_prompt, ai_provider,
+            )
+            continuation_parts.append(part)
+        except Exception as e:
+            logger.warning(f"Part {i} failed: {e}")
+            continuation_parts.append("")
 
-    # ── Call 2: remaining sections + bibliography ──
-    prompt2 = (
-        f"Continue the LaTeX document. Generate the REMAINING "
-        f"sections and the bibliography.\n\n"
-        f"REMAINING CONTENT (Part 2):\n{second_half}\n\n"
-        f"INSTRUCTIONS:\n{instructions}\n\n"
-        f"Generate ONLY:\n"
-        f"1. Any remaining \\section{{}} content from part 2\n"
-        f"2. The bibliography (\\begin{{thebibliography}} block)\n"
-        f"3. \\end{{document}}\n\n"
-        f"Do NOT repeat documentclass, packages, title, or abstract.\n"
-        f"Start directly with remaining sections.\n"
-        f"Return only LaTeX, no explanation."
-    )
-
-    try:
-        raw2 = ai_provider.complete(prompt2, system_prompt)
-        latex_part2 = _extract_latex_continuation(raw2)
-    except Exception as e:
-        logger.warning(f"Part 2 generation failed: {e}")
-        latex_part2 = "\\end{document}"
-
-    merged = _merge_latex_parts(latex_part1, latex_part2)
-
-    if "\\end{document}" not in merged:
-        merged += "\n\\end{document}"
-
+    merged = _merge_all_parts(part1_latex, continuation_parts)
     logger.info(f"Split generation complete: {len(merged)} chars")
+    return merged
+
+
+def _split_at_headings(content: str, n_parts: int) -> list[str]:
+    """Split content into n_parts at heading boundaries."""
+    target_size = len(content) // n_parts
+    parts: list[str] = []
+    remaining = content
+
+    for i in range(n_parts - 1):
+        search_start = max(0, target_size - 2000)
+        search_end = min(len(remaining), target_size + 2000)
+        search_area = remaining[search_start:search_end]
+
+        heading_match = re.search(r'\n#{1,3} ', search_area)
+        if heading_match:
+            split_pos = search_start + heading_match.start()
+        else:
+            para_match = re.search(r'\n\n', remaining[target_size:])
+            split_pos = (
+                target_size + para_match.start()
+                if para_match else target_size
+            )
+
+        parts.append(remaining[:split_pos].strip())
+        remaining = remaining[split_pos:].strip()
+        target_size = len(remaining) // max(1, n_parts - i - 1)
+
+    parts.append(remaining.strip())
+    return [p for p in parts if p]
+
+
+def _generate_part1(
+    chunk: str,
+    skeleton: str,
+    instructions: str,
+    template: str,
+    system_prompt: str,
+    ai_provider: Any,
+) -> str:
+    """Generate the first part with full document structure."""
+    from docstream.exceptions import StructuringError
+
+    prompt = (
+        f"Convert this document content to LaTeX.\n"
+        f"Use the template skeleton below.\n"
+        f"This is Part 1 — generate the complete document up to "
+        f"where the content ends. End with % CONTINUES_NEXT_PART\n\n"
+        f"TEMPLATE:\n{skeleton}\n\n"
+        f"INSTRUCTIONS:\n{instructions}\n\n"
+        f"CONTENT (Part 1):\n{chunk}\n\n"
+        f"RULES:\n"
+        f"- Fill all <<PLACEHOLDERS>> from the content\n"
+        f"- Include all sections from this content chunk\n"
+        f"- End file with comment: % CONTINUES_NEXT_PART\n"
+        f"- Do NOT write \\end{{document}}\n"
+        f"- Return only LaTeX"
+    )
+
+    try:
+        raw = ai_provider.complete(prompt, system_prompt)
+        latex = _extract_latex_partial(raw)
+        logger.info(f"Part 1: {len(latex)} chars")
+        return latex
+    except Exception as e:
+        raise StructuringError(f"Part 1 failed: {e}")
+
+
+def _generate_continuation(
+    chunk: str,
+    part_num: int,
+    total_parts: int,
+    system_prompt: str,
+    ai_provider: Any,
+) -> str:
+    """Generate a continuation part (sections only)."""
+    is_last = part_num == total_parts
+    ending_rule = (
+        "End with \\\\begin{thebibliography} and \\\\end{document}"
+        if is_last else
+        "End with % CONTINUES_NEXT_PART"
+    )
+
+    prompt = (
+        f"Continue this LaTeX document.\n"
+        f"Generate ONLY the remaining sections from the content below.\n"
+        f"This is Part {part_num} of {total_parts}.\n\n"
+        f"CONTENT (Part {part_num}):\n{chunk}\n\n"
+        f"RULES:\n"
+        f"- Do NOT repeat documentclass, packages, title, or abstract\n"
+        f"- Start directly with \\section{{}} commands\n"
+        f"- Convert [REF] entries to \\bibitem{{}} entries\n"
+        f"- Replace [?] with \\cite{{refN}} sequentially\n"
+        f"- {ending_rule}\n"
+        f"- Return only LaTeX sections, no preamble"
+    )
+
+    raw = ai_provider.complete(prompt, system_prompt)
+    latex = _extract_latex_continuation(raw)
+    logger.info(f"Part {part_num}: {len(latex)} chars")
+    return latex
+
+
+def _merge_all_parts(part1: str, continuation_parts: list[str]) -> str:
+    """Merge all generated parts into one complete LaTeX document."""
+    part1 = re.sub(r'%\s*CONTINUES_NEXT_PART.*', '', part1).rstrip()
+
+    cleaned: list[str] = []
+    for part in continuation_parts:
+        if part:
+            part = re.sub(
+                r'%\s*CONTINUES_NEXT_PART.*', '', part
+            ).rstrip()
+            cleaned.append(part)
+
+    merged = '\n\n'.join(p for p in [part1] + cleaned if p)
+
+    if '\\end{document}' not in merged:
+        merged = merged.rstrip() + '\n\\end{document}'
+
     return merged
 
 

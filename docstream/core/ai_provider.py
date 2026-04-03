@@ -77,7 +77,10 @@ class GeminiProvider(AIProvider):
         """Call Gemini API using google-genai SDK.
 
         Tries models in order, returns first successful response.
+        Retries once per model on 429 rate-limit errors with backoff.
         """
+        import time
+
         from google import genai  # lazy import
         from google.genai import types
 
@@ -86,33 +89,49 @@ class GeminiProvider(AIProvider):
         last_error = None
 
         for model_name in self.MODELS:
-            try:
-                config = types.GenerateContentConfig(
-                    temperature=0.1,
-                    max_output_tokens=16384,
-                )
-
-                if system:
-                    config.system_instruction = system
-
-                response = client.models.generate_content(
-                    model=model_name,
-                    contents=prompt,
-                    config=config,
-                )
-
-                if response.text:
-                    logger.info(
-                        f"Gemini responded using: {model_name}"
+            for attempt in range(2):  # retry once per model
+                try:
+                    config = types.GenerateContentConfig(
+                        temperature=0.1,
+                        max_output_tokens=16384,
                     )
-                    return response.text
 
-            except Exception as e:
-                last_error = e
-                logger.debug(
-                    f"Gemini model {model_name} failed: {e}"
-                )
-                continue
+                    if system:
+                        config.system_instruction = system
+
+                    response = client.models.generate_content(
+                        model=model_name,
+                        contents=prompt,
+                        config=config,
+                    )
+
+                    if response.text:
+                        logger.info(
+                            f"Gemini responded using: {model_name}"
+                        )
+                        return response.text
+
+                except Exception as e:
+                    error_str = str(e)
+                    last_error = e
+
+                    # Rate limit — wait and retry once
+                    if '429' in error_str and attempt == 0:
+                        wait_time = 10
+                        delay_match = re.search(
+                            r'retryDelay.*?(\d+)s', error_str
+                        )
+                        if delay_match:
+                            wait_time = int(delay_match.group(1)) + 2
+                        logger.info(
+                            f"Rate limited on {model_name}, "
+                            f"waiting {wait_time}s..."
+                        )
+                        time.sleep(wait_time)
+                        continue
+
+                    logger.debug(f"Gemini model {model_name} failed: {e}")
+                    break  # Try next model
 
         raise APIError(
             f"All Gemini models failed. "
