@@ -77,13 +77,14 @@ Rules:
 - Place table near where it is referenced in the text
 
 CITATION HANDLING:
-The extracted text may contain [?] where citations should appear.
-When you see [?] in the text:
-- Replace with \cite{refN} where N is the corresponding reference number
-- Keep track of which citation number corresponds to which reference
-- Match [?] occurrences to references in the bibliography
-If no bibliography entries are found:
-- Replace all [?] with \textsuperscript{N} using sequential numbers
+The document uses [N] style citations like [1], [2,3], [4].
+- ALWAYS use \cite{} commands — NEVER \textsuperscript
+- [1] → \cite{ref1}
+- [2,3] → \cite{ref2,ref3}
+- [1],[2] in sequence → \cite{ref1}\cite{ref2}
+- The extracted text may also contain [?] placeholders;
+  replace each [?] with \cite{refN} sequentially
+- Match [?] occurrences to bibliography entries in order
 
 <<BIBLIOGRAPHY_BLOCK>>
 Format references as:

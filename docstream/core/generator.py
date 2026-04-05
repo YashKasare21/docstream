@@ -87,16 +87,23 @@ def generate_latex(
     )
 
     if len(full_content) <= 15000:
-        return _generate_single(
+        latex = _generate_single(
+            full_content, skeleton, instructions,
+            template, system_prompt, ai_provider,
+        )
+    else:
+        logger.info("Document is long — using split generation strategy")
+        latex = _generate_split(
             full_content, skeleton, instructions,
             template, system_prompt, ai_provider,
         )
 
-    logger.info("Document is long — using split generation strategy")
-    return _generate_split(
-        full_content, skeleton, instructions,
-        template, system_prompt, ai_provider,
-    )
+    images = document.get("images", [])
+    if images and image_dir:
+        latex = _insert_figures(latex, images, template)
+        logger.info(f"Inserted {len(images)} figure environments")
+
+    return latex
 
 
 def _load_skeleton(template: str) -> str:
@@ -177,41 +184,15 @@ If running long, SHORTEN SECTIONS — never skip \
 \\thanks{brief note} inline — keep each \\thanks{} \
 under 20 words. Example: \
 \\author{John Smith\\thanks{Google Brain}}
-20. IMAGES — When you see [AVAILABLE IMAGES] in the content: \
-these are real image files extracted from the PDF, \
-saved alongside the .tex file. Use them like this: \
-\\begin{figure}[htbp] \
-\\centering \
-\\includegraphics[width=0.8\\linewidth]{fig_p1_0} \
-\\caption{Description} \
-\\label{fig:1} \
-\\end{figure} \
-CRITICAL: ONLY use filenames that appear in [AVAILABLE IMAGES]. \
-NEVER invent filenames. If a figure in text has no matching \
-image in [AVAILABLE IMAGES], use \\fbox{[Figure N]} instead. \
-Rules: use the filename WITHOUT extension in \\includegraphics; \
-place figures near where they are mentioned in text; \
-use width=0.8\\linewidth for full-width, \
-width=0.45\\linewidth for side-by-side; \
-for IEEE two-column use figure* for full-width; \
-always add \\caption{} and \\label{}."""
+20. CITATIONS must use \\cite{} ALWAYS. \
+NEVER use \\textsuperscript for citation numbers. \
+[1] → \\cite{ref1}, [1,2] → \\cite{ref1,ref2}. \
+This is non-negotiable."""
 
 
 def _build_content_parts(document: dict[str, Any]) -> list[str]:
     """Extract and format content parts from a document structure dict."""
     content_parts: list[str] = []
-
-    # Add image manifest so AI can use real filenames
-    images = document.get("images", [])
-    if images:
-        img_lines = ["[AVAILABLE IMAGES]"]
-        for img in images:
-            img_lines.append(
-                f"  {img['filename']} — page {img['page']}, "
-                f"size {img['width']}x{img['height']}px"
-            )
-        img_lines.append("[/AVAILABLE IMAGES]")
-        content_parts.append("\n".join(img_lines))
 
     meta = document.get("metadata", {})
     if meta.get("author"):
@@ -523,6 +504,90 @@ def _generate_continuation(
     latex = _extract_latex_continuation(raw)
     logger.info(f"Part {part_num}: {len(latex)} chars")
     return latex
+
+
+def _insert_figures(
+    latex: str,
+    images: list[dict],
+    template: str,
+) -> str:
+    """
+    Post-process LaTeX to insert figure environments.
+
+    Matches "Figure N" / "Fig. N" mentions in the text to
+    extracted images by number, then inserts \\begin{figure}
+    environments after the paragraph that cites each figure.
+    Images with no matching mention are appended at the end.
+    """
+    if not images:
+        return latex
+
+    # Split off bibliography / end-of-doc so we don't insert there
+    bib_start = latex.find('\\begin{thebibliography}')
+    if bib_start == -1:
+        bib_start = latex.find('\\end{document}')
+    body = latex[:bib_start] if bib_start > 0 else latex
+    tail = latex[bib_start:] if bib_start > 0 else ""
+
+    def make_figure(img: dict, fig_num: int) -> str:
+        stem = img['filename'].rsplit('.', 1)[0]
+        caption = f"Figure {fig_num}"
+        width = "0.9\\columnwidth" if template == "ieee" else "0.8\\linewidth"
+        return (
+            f"\n\\begin{{figure}}[htbp]\n"
+            f"\\centering\n"
+            f"\\includegraphics[width={width}]{{{stem}}}\n"
+            f"\\caption{{{caption}}}\n"
+            f"\\label{{fig:{fig_num}}}\n"
+            f"\\end{{figure}}\n"
+        )
+
+    # Find all "Figure N" / "Fig. N" mentions
+    fig_mentions = list(re.finditer(
+        r'(?:Figure|Fig\.?)\s+(\d+)',
+        body,
+        re.IGNORECASE,
+    ))
+
+    if not fig_mentions:
+        # No mentions — append all figures before bibliography
+        figures_block = "\n" + "".join(
+            make_figure(img, i) for i, img in enumerate(images, 1)
+        )
+        return body + figures_block + tail
+
+    # Insert each figure after the paragraph that first mentions it.
+    # Work backwards to keep string offsets valid.
+    result = body
+    inserted: set[int] = set()
+
+    for match in reversed(fig_mentions):
+        fig_num = int(match.group(1))
+        if fig_num in inserted or fig_num > len(images):
+            continue
+
+        figure_env = make_figure(images[fig_num - 1], fig_num)
+
+        # Find the next paragraph break or section after the mention
+        pos = match.end()
+        next_break = re.search(
+            r'\n\n|\n\\section|\n\\subsection',
+            result[pos:],
+        )
+        insert_pos = pos + (next_break.start() + 1 if next_break else 100)
+        result = result[:insert_pos] + figure_env + result[insert_pos:]
+        inserted.add(fig_num)
+
+    # Append any images that had no matching mention
+    remaining = "".join(
+        make_figure(images[i - 1], i)
+        for i in range(1, len(images) + 1)
+        if i not in inserted
+    )
+    if remaining:
+        result = result.rstrip() + "\n" + remaining + "\n"
+
+    return result + tail
 
 
 def _merge_all_parts(part1: str, continuation_parts: list[str]) -> str:
