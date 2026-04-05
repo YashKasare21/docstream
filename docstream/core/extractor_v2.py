@@ -395,30 +395,36 @@ def _identify_references(structure: list[dict[str, Any]]) -> list[dict[str, Any]
 
     References typically appear at the end of papers under a
     "References" heading, with entries like [1] Author, Title...
+    Detects the heading whether it is a heading or paragraph block,
+    and handles ALL-CAPS / numbered variants (e.g. "REFERENCES",
+    "6. References").
     """
-    ref_heading_names = {
-        "references", "bibliography", "works cited", "citations"
-    }
-    ref_entry_pattern = re.compile(r'^\[\d+\]')
+    ref_heading_pattern = re.compile(
+        r'^(?:\d+\s*\.?\s*)?'
+        r'(?:references?|bibliography|works?\s+cited|citations?)\.?\s*$',
+        re.IGNORECASE,
+    )
+    numbered_ref_pattern = re.compile(r'^\s*\[\d+\]\s*.{5,}')
 
     in_references = False
     result: list[dict[str, Any]] = []
 
     for block in structure:
-        text = block.get("text", "")
+        text = block.get("text", "").strip()
 
-        # Detect References section heading
-        if (
-            block["type"] == "heading"
-            and text.strip().lower() in ref_heading_names
-        ):
+        # Detect References heading — accept both heading AND paragraph blocks
+        if ref_heading_pattern.match(text):
             in_references = True
-            result.append(block)
+            result.append({**block, "type": "heading"})
             continue
 
-        # If inside references section, mark matching paragraph blocks
+        # Mark reference entries inside the references section
         if in_references and block["type"] == "paragraph":
-            if ref_entry_pattern.match(text.strip()):
+            if numbered_ref_pattern.match(text):
+                result.append({**block, "type": "reference"})
+                continue
+            elif text and len(text) > 20:
+                # Continuation text of a reference (no [N] prefix)
                 result.append({**block, "type": "reference"})
                 continue
 

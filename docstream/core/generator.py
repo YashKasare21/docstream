@@ -97,11 +97,28 @@ def generate_latex(
             full_content, skeleton, instructions,
             template, system_prompt, ai_provider,
         )
+        # _generate_single calls _postprocess_latex internally;
+        # _generate_split does not — apply it here so Fix 1 (fbox
+        # replacer) removes any AI-hallucinated \includegraphics
+        # BEFORE _insert_figures adds the real ones.
+        latex = _postprocess_latex(latex)
 
     images = document.get("images", [])
     if images and image_dir:
+        pre_len = len(latex)
+        has_end = '\\end{document}' in latex
+        bib_pos = latex.find('\\begin{thebibliography}')
+        logger.info(
+            f"Before figure insertion: latex={pre_len} chars, "
+            f"has_end_doc={has_end}, bib_pos={bib_pos}"
+        )
         latex = _insert_figures(latex, images, template)
-        logger.info(f"Inserted {len(images)} figure environments")
+        post_figs = len(re.findall(r'\\includegraphics', latex))
+        post_fbox = len(re.findall(r'\\fbox', latex))
+        logger.info(
+            f"After figure insertion: latex={len(latex)} chars, "
+            f"includegraphics={post_figs}, fbox={post_fbox}"
+        )
 
     return latex
 
@@ -518,16 +535,19 @@ def _insert_figures(
     template: str,
 ) -> str:
     """
-    Post-process LaTeX to insert figure environments.
+    Insert figure environments into a LaTeX document.
 
-    Tries to match figure mentions in the text by number.
-    Falls back to a dedicated Figures section before the
-    bibliography when no mentions are found.
+    Figures are always placed BEFORE \\begin{thebibliography}
+    or \\end{document} — never after either.
     """
     if not images:
         return latex
 
-    # Find split point — keep bibliography and \end{document} in tail
+    # Determine the insertion boundary — priority order:
+    # 1. \\begin{thebibliography}
+    # 2. \\bibliography{
+    # 3. \\end{document}
+    # 4. end of string
     insert_before = len(latex)
     for marker in (
         '\\begin{thebibliography}',
@@ -539,12 +559,11 @@ def _insert_figures(
             insert_before = pos
 
     body = latex[:insert_before]
-    tail = latex[insert_before:]
+    tail = latex[insert_before:]  # starts at bibliography or \end{document}
 
     def make_figure(img: dict, fig_num: int) -> str:
         stem = img['filename'].rsplit('.', 1)[0]
-        width = "0.9\\columnwidth" if template == "ieee" else "0.8\\linewidth"
-        # Use figure* for wide landscape images in ieee two-column
+        width = "0.9\\columnwidth" if template == "ieee" else "0.75\\linewidth"
         env = (
             "figure*"
             if template == "ieee" and img['width'] > img['height']
@@ -559,59 +578,58 @@ def _insert_figures(
             f"\\end{{{env}}}\n"
         )
 
-    # Broad patterns — match "Fig 1", "Figure 1", "Fig. 1",
-    # "Fig.\ 1", "Figure~1", "\ref{fig:1}"
-    _FIG_PATTERNS = [
-        r'(?i)fig(?:ure)?\.?[\s~\\]*(\d+)',
-        r'(?i)\\ref\{fig:(\d+)\}',
-    ]
+    # Broad pattern covers: Fig 1, Figure 1, Fig. 1, Fig.~1, Fig.\ 1
+    fig_pattern = re.compile(r'(?i)fig(?:ure)?\.?\s*[~\\]?\s*(\d+)')
+    ref_pattern = re.compile(r'(?i)\\ref\{fig:(\d+)\}')
 
-    mentions: dict[int, int] = {}  # fig_num → end-pos in body
-    for pattern in _FIG_PATTERNS:
-        for m in re.finditer(pattern, body):
+    mentions: dict[int, int] = {}
+    for pat in (fig_pattern, ref_pattern):
+        for m in pat.finditer(body):
             num = int(m.group(1))
-            if num not in mentions:
+            if num <= len(images) and num not in mentions:
                 mentions[num] = m.end()
 
+    logger.info(
+        f"Figure insertion: mentions={sorted(mentions.keys())}, "
+        f"images={len(images)}, insert_before={insert_before}, "
+        f"body_len={len(body)}, tail_starts_with="
+        f"{repr(tail[:40])}"
+    )
+
     if not mentions:
-        # No figure mentions anywhere — add a Figures section
         logger.info(
-            "No figure mentions found in LaTeX body; "
-            "appending dedicated Figures section"
+            "No figure mentions found — inserting figures "
+            "section before bibliography"
         )
-        figures_block = "\n\\newpage\n\\section*{Figures}\n" + "".join(
+        figures_section = "\n\\clearpage\n" + "".join(
             make_figure(img, i) for i, img in enumerate(images, 1)
         )
-        return body + figures_block + tail
+        return body + figures_section + tail
 
-    # Insert figures after the paragraph that first mentions them.
-    # Process in reverse order to keep string offsets stable.
     result = body
     inserted: set[int] = set()
 
     for fig_num in sorted(mentions.keys(), reverse=True):
-        if fig_num > len(images):
-            continue
         figure_env = make_figure(images[fig_num - 1], fig_num)
         pos = mentions[fig_num]
         para_end = re.search(
-            r'\n\n|\n\\(?:sub)*section',
+            r'\n\n|\n\\(?:sub)*section|\n\\clearpage',
             result[pos:],
         )
-        insert_pos = pos + (para_end.start() + 1 if para_end else 200)
+        insert_pos = (
+            pos + para_end.start() + 1
+            if para_end else min(pos + 300, len(result))
+        )
         result = result[:insert_pos] + figure_env + result[insert_pos:]
         inserted.add(fig_num)
 
-    # Append any images that had no matching mention
+    # Remaining figures (no mention) go into body, before tail
     remaining = "".join(
         make_figure(images[i - 1], i)
         for i in range(1, len(images) + 1)
         if i not in inserted
     )
-    if remaining:
-        result = result.rstrip() + "\n" + remaining + "\n"
-
-    return result + tail
+    return result + remaining + tail
 
 
 def _merge_all_parts(part1: str, continuation_parts: list[str]) -> str:
@@ -807,6 +825,73 @@ def _extract_latex(response: str) -> str:
     return latex
 
 
+def _fix_citations(latex: str) -> str:
+    """
+    Resolve [?] citation placeholders left by the AI.
+
+    Handles:
+    - Standalone [?]  →  \\cite{refN}
+    - Mixed [3, ?, ?] →  \\cite{ref3,refN,refM}
+    - Numeric [3]     →  \\cite{ref3}  (when inside a mixed group)
+
+    Falls back to \\textsuperscript{N} if no \\bibitem{} exist.
+    """
+    bibitems = re.findall(r'\\bibitem\{([^}]+)\}', latex)
+
+    if not bibitems:
+        if not re.search(r'\[\?\]', latex):
+            return latex
+        # No bibliography at all — number as superscripts
+        counter = [0]
+
+        def _sup(_m: re.Match) -> str:
+            counter[0] += 1
+            return f'\\textsuperscript{{{counter[0]}}}'
+
+        return re.sub(r'\[\?\]', _sup, latex)
+
+    # Split body / bibliography so we only touch the body
+    bib_start = latex.find('\\begin{thebibliography}')
+    if bib_start > 0:
+        body, bib = latex[:bib_start], latex[bib_start:]
+    else:
+        body, bib = latex, ""
+
+    cite_counter = [0]
+
+    def _next_cite() -> str:
+        key = bibitems[cite_counter[0] % len(bibitems)]
+        cite_counter[0] += 1
+        return key
+
+    def _resolve_group(m: re.Match) -> str:
+        """Convert [a, ?, b] to \\cite{key_a, key_?, key_b}."""
+        parts = [p.strip() for p in m.group(1).split(',')]
+        keys: list[str] = []
+        for p in parts:
+            if p == '?':
+                keys.append(_next_cite())
+            elif p.isdigit():
+                idx = int(p) - 1
+                keys.append(
+                    bibitems[idx] if 0 <= idx < len(bibitems)
+                    else _next_cite()
+                )
+            else:
+                keys.append(p)
+        return f'\\cite{{{",".join(keys)}}}'
+
+    # Replace mixed/group citations containing ? first
+    body = re.sub(r'\[([^\]]*\?[^\]]*)\]', _resolve_group, body)
+    # Replace any remaining standalone [?]
+    body = re.sub(
+        r'\[\?\]',
+        lambda _m: f'\\cite{{{_next_cite()}}}',
+        body,
+    )
+    return body + bib
+
+
 def _postprocess_latex(latex: str) -> str:
     """
     Post-process AI-generated LaTeX to fix common errors.
@@ -882,35 +967,8 @@ def _postprocess_latex(latex: str) -> str:
     ):
         latex = latex.replace(old, new)
 
-    # Fix 7: Replace [?] with sequential \cite{refN}
-    # The AI should have resolved these, but handle any that slipped through.
-    bibitems = re.findall(r'\\bibitem\{([^}]+)\}', latex)
-
-    if bibitems:
-        cite_counter = [0]
-
-        def replace_unknown_cite(_match: re.Match) -> str:
-            idx = cite_counter[0] % len(bibitems)
-            cite_counter[0] += 1
-            return f'\\cite{{{bibitems[idx]}}}'
-
-        bib_start = latex.find('\\begin{thebibliography}')
-        if bib_start > 0:
-            body = latex[:bib_start]
-            bibliography = latex[bib_start:]
-            body = re.sub(r'\[\?\]', replace_unknown_cite, body)
-            latex = body + bibliography
-        else:
-            latex = re.sub(r'\[\?\]', replace_unknown_cite, latex)
-    elif re.search(r'\[\?\]', latex):
-        # No bibliography — replace [?] with superscript numbers
-        counter = [0]
-
-        def replace_with_superscript(_match: re.Match) -> str:
-            counter[0] += 1
-            return f'\\textsuperscript{{{counter[0]}}}'
-
-        latex = re.sub(r'\[\?\]', replace_with_superscript, latex)
+    # Fix 7: Citation resolution — handles [?], [3,?,?], [?,5]
+    latex = _fix_citations(latex)
 
     # Fix 8: Replace undefined control sequences common in AI output
     # Only replace when clearly used as a command (not part of a longer word)
