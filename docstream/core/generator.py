@@ -197,10 +197,13 @@ this strict order: (1) \\documentclass and packages, \
 (10) bibliography, (11) \\end{document} — MUST include. \
 If running long, SHORTEN SECTIONS — never skip \
 \\end{abstract} or \\end{document}.
-19. For author footnotes (∗ † ‡ symbols): use \
-\\thanks{brief note} inline — keep each \\thanks{} \
-under 20 words. Example: \
-\\author{John Smith\\thanks{Google Brain}}
+19. AUTHOR AFFILIATIONS — always include department and \
+institution in \\thanks{}. If the content has affiliation \
+lines (university, college, dept, email) near the author \
+names, include them. Format: \
+\\author{Name One\\thanks{Dept., University, City. Email: x@y.z} \
+\\and Name Two\\thanks{Dept., University.}} \
+NEVER omit affiliations when they appear in the content.
 20. CITATIONS must use \\cite{} ALWAYS. \
 NEVER use \\textsuperscript for citation numbers. \
 [1] → \\cite{ref1}, [1,2] → \\cite{ref1,ref2}. \
@@ -410,32 +413,50 @@ def _generate_split(
 
 
 def _split_at_headings(content: str, n_parts: int) -> list[str]:
-    """Split content into n_parts at heading boundaries."""
+    """
+    Split content into n_parts chunks.
+
+    Priority: heading boundary > paragraph boundary > word boundary.
+    Never splits mid-sentence to avoid truncated sections.
+    """
     target_size = len(content) // n_parts
     parts: list[str] = []
     remaining = content
 
     for i in range(n_parts - 1):
-        search_start = max(0, target_size - 2000)
-        search_end = min(len(remaining), target_size + 2000)
+        split_target = min(target_size, len(remaining) - 1)
+        search_start = max(0, split_target - 2000)
+        search_end = min(len(remaining), split_target + 2000)
         search_area = remaining[search_start:search_end]
 
+        # Priority 1: split at a heading
         heading_match = re.search(r'\n#{1,3} ', search_area)
         if heading_match:
             split_pos = search_start + heading_match.start()
         else:
-            para_match = re.search(r'\n\n', remaining[target_size:])
-            split_pos = (
-                target_size + para_match.start()
-                if para_match else target_size
-            )
+            # Priority 2: split at next paragraph boundary after target
+            para_match = re.search(r'\n\n', remaining[split_target:])
+            if para_match:
+                split_pos = split_target + para_match.end()
+            else:
+                # Priority 3: split at next word boundary
+                split_pos = split_target
+                while (
+                    split_pos < len(remaining)
+                    and remaining[split_pos] not in (' ', '\n')
+                ):
+                    split_pos += 1
 
         parts.append(remaining[:split_pos].strip())
         remaining = remaining[split_pos:].strip()
+
+        if not remaining:
+            break
+
         target_size = len(remaining) // max(1, n_parts - i - 1)
 
     parts.append(remaining.strip())
-    return [p for p in parts if p]
+    return [p for p in parts if p.strip()]
 
 
 def _generate_part1(
@@ -499,6 +520,23 @@ def _generate_continuation(
             f"Do NOT repeat or summarize previous content.\n"
         )
 
+    # If this chunk contains [REF] lines, add explicit bibliography instruction
+    ref_instruction = ""
+    if "[REF]" in chunk:
+        ref_instruction = (
+            "\nBIBLIOGRAPHY INSTRUCTION:\n"
+            "This chunk contains [REF] lines — these are REAL reference entries.\n"
+            "Format each as a \\bibitem using the FULL TEXT after [REF]:\n"
+            "\\begin{thebibliography}{99}\n"
+            "\\bibitem{ref1}\n"
+            "Author A and Author B, ``Title of Paper,'' Journal, vol. X, 2020.\n"
+            "\\bibitem{ref2}\n"
+            "Author C, \\textit{Book Title}. Publisher, 2019.\n"
+            "\\end{thebibliography}\n"
+            "CRITICAL: Copy the ACTUAL text from each [REF] line verbatim.\n"
+            "Do NOT write [REF1], [REF2] or any placeholder. Use the real text.\n"
+        )
+
     word_count = len(chunk.split())
     min_chars = max(3000, word_count * 4)
 
@@ -506,7 +544,8 @@ def _generate_continuation(
         f"You are continuing a LaTeX document. "
         f"Generate ALL remaining sections from the content below.\n"
         f"This is Part {part_num} of {total_parts}.\n"
-        f"{context_hint}\n"
+        f"{context_hint}"
+        f"{ref_instruction}\n"
         f"CONTENT TO CONVERT (Part {part_num}, ~{word_count} words):\n"
         f"{chunk}\n\n"
         f"STRICT REQUIREMENTS:\n"
@@ -514,7 +553,7 @@ def _generate_continuation(
         f"2. Do NOT summarize or truncate any section\n"
         f"3. Do NOT repeat sections from previous parts\n"
         f"4. Start with \\section{{}} for each new section\n"
-        f"5. Convert [REF] lines to \\bibitem{{}} entries\n"
+        f"5. Convert [REF] lines to \\bibitem{{}} with REAL text — never placeholders\n"
         f"6. Use \\cite{{refN}} for citations — NEVER \\textsuperscript\n"
         f"7. Every \\begin{{}} must have a matching \\end{{}}\n"
         f"8. {ending_rule}\n"
@@ -570,7 +609,7 @@ def _insert_figures(
             else "figure"
         )
         return (
-            f"\n\\begin{{{env}}}[htbp]\n"
+            f"\n\\begin{{{env}}}[H]\n"
             f"\\centering\n"
             f"\\includegraphics[width={width}]{{{stem}}}\n"
             f"\\caption{{Figure {fig_num}}}\n"
@@ -741,9 +780,12 @@ def _preprocess_content(structured_content: str) -> str:
     Moves footnote-heavy blocks from the document start
     to the end so they don't inflate the title area.
     """
-    footnote_markers = [
-        '∗', '†', '‡', 'Equal contribution',
-        'Work performed', 'Google Brain', 'Google Research',
+    footnote_symbols = ['∗', '†', '‡', '§', '¶',
+                        'Equal contribution', 'Work performed while at']
+
+    affiliation_keywords = [
+        'university', 'college', 'institute', 'department',
+        'dept', 'school', 'laboratory', 'lab',
     ]
 
     lines = structured_content.split('\n\n')
@@ -754,10 +796,23 @@ def _preprocess_content(structured_content: str) -> str:
     footnotes: list[str] = []
 
     for i, block in enumerate(lines[:10]):
-        is_footnote = any(marker in block for marker in footnote_markers)
         word_count = len(block.split())
-        # Only move blocks that are footnote-heavy, long, and not first two
-        if is_footnote and word_count > 30 and i > 1:
+        has_footnote_symbol = any(sym in block for sym in footnote_symbols)
+        has_email = '@' in block
+        is_affiliation = any(
+            kw in block.lower() for kw in affiliation_keywords
+        )
+
+        # Only move blocks that are clearly footnotes:
+        # must have a footnote symbol, be long, appear after
+        # title/authors, and NOT be email/affiliation blocks
+        if (
+            has_footnote_symbol
+            and word_count > 50
+            and i > 1
+            and not has_email
+            and not is_affiliation
+        ):
             footnotes.append(f"[FOOTNOTE] {block}")
         else:
             clean_start.append(block)
