@@ -476,28 +476,34 @@ def _generate_continuation(
     context_hint = ""
     if last_section_written:
         context_hint = (
-            f"\nIMPORTANT CONTEXT:\n"
-            f'Part {part_num - 1} already covered up to and including '
-            f'the section: "{last_section_written}"\n'
-            f"DO NOT repeat or regenerate any sections already covered.\n"
-            f"Continue ONLY from where Part {part_num - 1} left off.\n"
-            f'Start with the NEXT section after "{last_section_written}".\n'
+            f"\nCONTEXT: Part {part_num - 1} already wrote up to section: "
+            f'"{last_section_written}". '
+            f"Start IMMEDIATELY with the next section after that. "
+            f"Do NOT repeat or summarize previous content.\n"
         )
 
+    word_count = len(chunk.split())
+    min_chars = max(3000, word_count * 4)
+
     prompt = (
-        f"Continue this LaTeX document.\n"
-        f"Generate ONLY the remaining sections from the content below.\n"
+        f"You are continuing a LaTeX document. "
+        f"Generate ALL remaining sections from the content below.\n"
         f"This is Part {part_num} of {total_parts}.\n"
         f"{context_hint}\n"
-        f"CONTENT (Part {part_num}):\n{chunk}\n\n"
-        f"RULES:\n"
-        f"- Do NOT repeat documentclass, packages, title, or abstract\n"
-        f"- Do NOT repeat sections already written in previous parts\n"
-        f'- Start directly with the NEXT \\section{{}} not yet written\n'
-        f"- Convert [REF] entries to \\bibitem{{}} entries\n"
-        f"- Replace [?] with \\cite{{refN}} sequentially\n"
-        f"- {ending_rule}\n"
-        f"- Return only new LaTeX sections, no preamble"
+        f"CONTENT TO CONVERT (Part {part_num}, ~{word_count} words):\n"
+        f"{chunk}\n\n"
+        f"STRICT REQUIREMENTS:\n"
+        f"1. Convert ALL {word_count} words above into LaTeX — do NOT stop early\n"
+        f"2. Do NOT summarize or truncate any section\n"
+        f"3. Do NOT repeat sections from previous parts\n"
+        f"4. Start with \\section{{}} for each new section\n"
+        f"5. Convert [REF] lines to \\bibitem{{}} entries\n"
+        f"6. Use \\cite{{refN}} for citations — NEVER \\textsuperscript\n"
+        f"7. Every \\begin{{}} must have a matching \\end{{}}\n"
+        f"8. {ending_rule}\n"
+        f"9. CRITICAL: Output MUST be at least {min_chars} characters. "
+        f"If running short, write each section in full prose — never skip content.\n"
+        f"\nReturn ONLY LaTeX — no preamble, no explanation:"
     )
 
     raw = ai_provider.complete(prompt, system_prompt)
@@ -514,67 +520,85 @@ def _insert_figures(
     """
     Post-process LaTeX to insert figure environments.
 
-    Matches "Figure N" / "Fig. N" mentions in the text to
-    extracted images by number, then inserts \\begin{figure}
-    environments after the paragraph that cites each figure.
-    Images with no matching mention are appended at the end.
+    Tries to match figure mentions in the text by number.
+    Falls back to a dedicated Figures section before the
+    bibliography when no mentions are found.
     """
     if not images:
         return latex
 
-    # Split off bibliography / end-of-doc so we don't insert there
-    bib_start = latex.find('\\begin{thebibliography}')
-    if bib_start == -1:
-        bib_start = latex.find('\\end{document}')
-    body = latex[:bib_start] if bib_start > 0 else latex
-    tail = latex[bib_start:] if bib_start > 0 else ""
+    # Find split point — keep bibliography and \end{document} in tail
+    insert_before = len(latex)
+    for marker in (
+        '\\begin{thebibliography}',
+        '\\bibliography{',
+        '\\end{document}',
+    ):
+        pos = latex.find(marker)
+        if pos != -1 and pos < insert_before:
+            insert_before = pos
+
+    body = latex[:insert_before]
+    tail = latex[insert_before:]
 
     def make_figure(img: dict, fig_num: int) -> str:
         stem = img['filename'].rsplit('.', 1)[0]
-        caption = f"Figure {fig_num}"
         width = "0.9\\columnwidth" if template == "ieee" else "0.8\\linewidth"
+        # Use figure* for wide landscape images in ieee two-column
+        env = (
+            "figure*"
+            if template == "ieee" and img['width'] > img['height']
+            else "figure"
+        )
         return (
-            f"\n\\begin{{figure}}[htbp]\n"
+            f"\n\\begin{{{env}}}[htbp]\n"
             f"\\centering\n"
             f"\\includegraphics[width={width}]{{{stem}}}\n"
-            f"\\caption{{{caption}}}\n"
+            f"\\caption{{Figure {fig_num}}}\n"
             f"\\label{{fig:{fig_num}}}\n"
-            f"\\end{{figure}}\n"
+            f"\\end{{{env}}}\n"
         )
 
-    # Find all "Figure N" / "Fig. N" mentions
-    fig_mentions = list(re.finditer(
-        r'(?:Figure|Fig\.?)\s+(\d+)',
-        body,
-        re.IGNORECASE,
-    ))
+    # Broad patterns — match "Fig 1", "Figure 1", "Fig. 1",
+    # "Fig.\ 1", "Figure~1", "\ref{fig:1}"
+    _FIG_PATTERNS = [
+        r'(?i)fig(?:ure)?\.?[\s~\\]*(\d+)',
+        r'(?i)\\ref\{fig:(\d+)\}',
+    ]
 
-    if not fig_mentions:
-        # No mentions — append all figures before bibliography
-        figures_block = "\n" + "".join(
+    mentions: dict[int, int] = {}  # fig_num → end-pos in body
+    for pattern in _FIG_PATTERNS:
+        for m in re.finditer(pattern, body):
+            num = int(m.group(1))
+            if num not in mentions:
+                mentions[num] = m.end()
+
+    if not mentions:
+        # No figure mentions anywhere — add a Figures section
+        logger.info(
+            "No figure mentions found in LaTeX body; "
+            "appending dedicated Figures section"
+        )
+        figures_block = "\n\\newpage\n\\section*{Figures}\n" + "".join(
             make_figure(img, i) for i, img in enumerate(images, 1)
         )
         return body + figures_block + tail
 
-    # Insert each figure after the paragraph that first mentions it.
-    # Work backwards to keep string offsets valid.
+    # Insert figures after the paragraph that first mentions them.
+    # Process in reverse order to keep string offsets stable.
     result = body
     inserted: set[int] = set()
 
-    for match in reversed(fig_mentions):
-        fig_num = int(match.group(1))
-        if fig_num in inserted or fig_num > len(images):
+    for fig_num in sorted(mentions.keys(), reverse=True):
+        if fig_num > len(images):
             continue
-
         figure_env = make_figure(images[fig_num - 1], fig_num)
-
-        # Find the next paragraph break or section after the mention
-        pos = match.end()
-        next_break = re.search(
-            r'\n\n|\n\\section|\n\\subsection',
+        pos = mentions[fig_num]
+        para_end = re.search(
+            r'\n\n|\n\\(?:sub)*section',
             result[pos:],
         )
-        insert_pos = pos + (next_break.start() + 1 if next_break else 100)
+        insert_pos = pos + (para_end.start() + 1 if para_end else 200)
         result = result[:insert_pos] + figure_env + result[insert_pos:]
         inserted.add(fig_num)
 
@@ -899,5 +923,25 @@ def _postprocess_latex(latex: str) -> str:
     ]
     for pattern, replacement in undefined_fixes:
         latex = re.sub(pattern, replacement, latex)
+
+    # Fix 9: Clean Roman numeral prefixes from section headings
+    # AI sometimes produces \section{5 V. Future Work} or \section{IV. Intro}
+    def _clean_section_title(match: re.Match) -> str:
+        cmd = match.group(1)   # "section" or "subsection" etc.
+        title = match.group(2)
+        # Strip leading "N V. " or "IV. " style prefixes
+        cleaned = re.sub(r'^\d*\s*[IVXivx]+\.\s+', '', title).strip()
+        # Strip leading single-letter prefix "A. " from subsections
+        cleaned = re.sub(r'^[A-Z]\.\s+', '', cleaned).strip()
+        # Convert ALL-CAPS titles to Title Case (keep short acronyms intact)
+        if cleaned.isupper() and len(cleaned) > 4:
+            cleaned = cleaned.title()
+        return f'\\{cmd}{{{cleaned}}}'
+
+    latex = re.sub(
+        r'\\((?:sub)*section\*?)\{([^}]+)\}',
+        _clean_section_title,
+        latex,
+    )
 
     return latex

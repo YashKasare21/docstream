@@ -108,47 +108,61 @@ def compile_latex(
         return output_tex, output_pdf
 
 
+def _fix_unclosed_environments(latex: str) -> str:
+    """
+    Close any \\begin{env} that has no matching \\end{env}.
+
+    Inserts missing \\end{} commands just before \\end{document},
+    or at the end of the string if \\end{document} is absent.
+    Skips the 'document' environment itself.
+    """
+    from collections import Counter
+
+    begins = re.findall(r'\\begin\{(\w+\*?)\}', latex)
+    ends = re.findall(r'\\end\{(\w+\*?)\}', latex)
+    begin_counts: Counter[str] = Counter(begins)
+    end_counts: Counter[str] = Counter(ends)
+
+    closings: list[str] = []
+    seen: Counter[str] = Counter()
+    for env in begins:
+        if env == "document":
+            continue
+        seen[env] += 1
+        if seen[env] > end_counts.get(env, 0):
+            closings.append(f"\\end{{{env}}}")
+
+    if not closings:
+        return latex
+
+    closing_block = "\n" + "\n".join(reversed(closings)) + "\n"
+    end_doc = latex.rfind("\\end{document}")
+    if end_doc != -1:
+        latex = latex[:end_doc] + closing_block + latex[end_doc:]
+    else:
+        latex = latex.rstrip() + closing_block
+
+    logger.warning("Closed unclosed environments: %s", closings)
+    return latex
+
+
 def _ensure_complete_latex(latex: str) -> str:
     """
     Ensure LaTeX document is complete and compilable.
 
-    If document is truncated (missing \\end{document}),
-    close all open environments and add the end marker.
+    Fixes unclosed environments regardless of whether
+    \\end{document} is present, then adds it if missing.
     """
-    from collections import Counter
+    # Always repair unclosed environments
+    latex = _fix_unclosed_environments(latex)
 
     if "\\end{document}" in latex:
         return latex
 
-    # Document is truncated — emergency repair
-    begins = re.findall(r'\\begin\{(\w+)\}', latex)
-    ends = re.findall(r'\\end\{(\w+)\}', latex)
-
-    begin_counts: Counter[str] = Counter(begins)
-    end_counts: Counter[str] = Counter(ends)
-
-    # Find unclosed environments (in open order), skip 'document'
-    # since we always append \end{document} explicitly below
-    open_envs: list[str] = []
-    for env in begins:
-        if env == "document":
-            continue
-        if begin_counts[env] > end_counts.get(env, 0):
-            open_envs.append(env)
-            end_counts[env] = end_counts.get(env, 0) + 1
-
-    closing = ""
-    for env in reversed(open_envs):
-        closing += f"\n\\end{{{env}}}"
-
-    closing += "\n\\end{document}"
-
-    logger.warning(
-        "LaTeX was truncated — added emergency closing: %s",
-        closing.strip(),
-    )
-
-    return latex + closing
+    # Document truncated — add closing
+    latex = latex.rstrip() + "\n\\end{document}"
+    logger.warning("LaTeX was truncated — appended \\end{document}")
+    return latex
 
 
 def _xelatex_available() -> bool:
