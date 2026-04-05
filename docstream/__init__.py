@@ -95,6 +95,7 @@ def convert(
             print(f"LaTeX: {result.tex_path}")
             print(f"PDF: {result.pdf_path}")
     """
+    import shutil
     import time
     from docstream.core.extractor_v2 import extract_structured
     from docstream.core.generator import generate_latex
@@ -103,25 +104,40 @@ def convert(
 
     start_time = time.time()
     output_dir = Path(output_dir)
+    output_dir.mkdir(parents=True, exist_ok=True)
+    image_dir = output_dir / "images"
 
     try:
-        # Step 1: Extract
+        # Step 1: Extract text and images
         logger.info(f"Step 1/3: Extracting from {Path(pdf_path).name}")
-        document = extract_structured(pdf_path)
+        document = extract_structured(pdf_path, image_output_dir=image_dir)
+        n_images = len(document.get("images", []))
         logger.info(
             f"Extracted {len(document['structure'])} blocks"
+            f" and {n_images} images"
         )
 
         # Step 2: Generate LaTeX
         logger.info(f"Step 2/3: Generating LaTeX ({template} template)")
-        latex = generate_latex(document, template, ai_provider)
+        latex = generate_latex(
+            document, template, ai_provider,
+            image_dir=image_dir,
+        )
         logger.info(f"Generated {len(latex)} chars of LaTeX")
 
-        # Step 3: Compile
+        # Step 3: Compile with images
         logger.info("Step 3/3: Compiling with XeLaTeX")
         tex_path, pdf_path_out = compile_latex(
-            latex, output_dir
+            latex, output_dir,
+            image_dir=image_dir if n_images > 0 else None,
         )
+
+        # Copy images to output dir root for easy access
+        if n_images > 0 and image_dir.exists():
+            for img_file in image_dir.glob("fig_p*.*"):
+                dest = output_dir / img_file.name
+                if not dest.exists():
+                    shutil.copy2(str(img_file), str(dest))
 
         processing_time = round(time.time() - start_time, 1)
         logger.info(f"Conversion complete in {processing_time}s")

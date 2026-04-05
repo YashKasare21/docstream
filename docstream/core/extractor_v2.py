@@ -22,7 +22,109 @@ import fitz  # PyMuPDF
 logger = logging.getLogger(__name__)
 
 
-def extract_structured(pdf_path: str | Path) -> dict[str, Any]:
+def extract_images(
+    pdf_path: str | Path,
+    output_dir: str | Path,
+) -> list[dict]:
+    """
+    Extract all images from a PDF and save them to disk.
+
+    Returns list of dicts with filename, path, page, width,
+    height, bbox, and index. Skips images smaller than 50x50px
+    (decorations) and corrupt/unreadable images.
+
+    Args:
+        pdf_path: Path to the source PDF
+        output_dir: Directory to save extracted images
+
+    Returns:
+        List of image metadata dicts, sorted by page then position
+    """
+    pdf_path = Path(pdf_path)
+    output_dir = Path(output_dir)
+    output_dir.mkdir(parents=True, exist_ok=True)
+
+    doc = fitz.open(str(pdf_path))
+    images: list[dict] = []
+
+    try:
+        for page_num, page in enumerate(doc):
+            page_height = page.rect.height
+            page_width = page.rect.width
+            img_list = page.get_images(full=True)
+
+            for img_idx, img_info in enumerate(img_list):
+                xref = img_info[0]
+                try:
+                    base_image = doc.extract_image(xref)
+                    img_bytes = base_image["image"]
+                    img_ext = base_image["ext"]
+                    img_width = base_image["width"]
+                    img_height = base_image["height"]
+
+                    # Skip tiny decorations
+                    if img_width < 50 or img_height < 50:
+                        continue
+
+                    # Skip full-page backgrounds
+                    if (
+                        img_width > page_width * 5
+                        and img_height > page_height * 5
+                    ):
+                        continue
+
+                    # Normalize extension
+                    if img_ext in ("jpeg", "jpg"):
+                        img_ext = "jpg"
+                    elif img_ext not in ("png", "gif", "bmp"):
+                        img_ext = "png"
+
+                    filename = f"fig_p{page_num + 1}_{img_idx}.{img_ext}"
+                    img_path = output_dir / filename
+                    img_path.write_bytes(img_bytes)
+
+                    # Get bounding box on page
+                    bbox = None
+                    for rect in page.get_image_rects(xref):
+                        bbox = (
+                            round(rect.x0), round(rect.y0),
+                            round(rect.x1), round(rect.y1),
+                        )
+                        break
+
+                    images.append({
+                        "filename": filename,
+                        "path": img_path,
+                        "page": page_num + 1,
+                        "width": img_width,
+                        "height": img_height,
+                        "bbox": bbox,
+                        "index": img_idx,
+                        "xref": xref,
+                    })
+
+                    logger.debug(
+                        f"Extracted image: {filename} "
+                        f"({img_width}x{img_height})"
+                    )
+
+                except Exception as e:
+                    logger.debug(f"Skipping image xref={xref}: {e}")
+                    continue
+    finally:
+        doc.close()
+
+    images.sort(key=lambda x: (x["page"], x["bbox"][1] if x["bbox"] else 0))
+    logger.info(
+        f"Extracted {len(images)} images from {pdf_path.name}"
+    )
+    return images
+
+
+def extract_structured(
+    pdf_path: str | Path,
+    image_output_dir: str | Path | None = None,
+) -> dict[str, Any]:
     """
     Extract structured content from a PDF file.
 
@@ -57,9 +159,14 @@ def extract_structured(pdf_path: str | Path) -> dict[str, Any]:
         )
 
     try:
-        return _process_document(doc, pdf_path)
+        result = _process_document(doc, pdf_path)
     finally:
         doc.close()
+
+    if image_output_dir:
+        result["images"] = extract_images(pdf_path, image_output_dir)
+
+    return result
 
 
 _LIGATURE_FIXES = {
@@ -264,7 +371,7 @@ def _process_document(
         f"{doc.page_count} pages of {pdf_path.name}"
     )
 
-    return {
+    result: dict[str, Any] = {
         "title": title,
         "metadata": {
             "author": metadata.get("author", ""),
@@ -276,7 +383,10 @@ def _process_document(
         "structure": structure,
         "full_text": full_text,
         "body_font_size": body_font_size,
+        "images": [],
     }
+
+    return result
 
 
 def _identify_references(structure: list[dict[str, Any]]) -> list[dict[str, Any]]:

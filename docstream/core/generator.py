@@ -29,6 +29,7 @@ def generate_latex(
     document: dict[str, Any],
     template: str,
     ai_provider=None,
+    image_dir: Path | None = None,
 ) -> str:
     """
     Generate complete LaTeX document from structured content.
@@ -175,12 +176,42 @@ If running long, SHORTEN SECTIONS — never skip \
 19. For author footnotes (∗ † ‡ symbols): use \
 \\thanks{brief note} inline — keep each \\thanks{} \
 under 20 words. Example: \
-\\author{John Smith\\thanks{Google Brain}}"""
+\\author{John Smith\\thanks{Google Brain}}
+20. IMAGES — When you see [AVAILABLE IMAGES] in the content: \
+these are real image files extracted from the PDF, \
+saved alongside the .tex file. Use them like this: \
+\\begin{figure}[htbp] \
+\\centering \
+\\includegraphics[width=0.8\\linewidth]{fig_p1_0} \
+\\caption{Description} \
+\\label{fig:1} \
+\\end{figure} \
+CRITICAL: ONLY use filenames that appear in [AVAILABLE IMAGES]. \
+NEVER invent filenames. If a figure in text has no matching \
+image in [AVAILABLE IMAGES], use \\fbox{[Figure N]} instead. \
+Rules: use the filename WITHOUT extension in \\includegraphics; \
+place figures near where they are mentioned in text; \
+use width=0.8\\linewidth for full-width, \
+width=0.45\\linewidth for side-by-side; \
+for IEEE two-column use figure* for full-width; \
+always add \\caption{} and \\label{}."""
 
 
 def _build_content_parts(document: dict[str, Any]) -> list[str]:
     """Extract and format content parts from a document structure dict."""
     content_parts: list[str] = []
+
+    # Add image manifest so AI can use real filenames
+    images = document.get("images", [])
+    if images:
+        img_lines = ["[AVAILABLE IMAGES]"]
+        for img in images:
+            img_lines.append(
+                f"  {img['filename']} — page {img['page']}, "
+                f"size {img['width']}x{img['height']}px"
+            )
+        img_lines.append("[/AVAILABLE IMAGES]")
+        content_parts.append("\n".join(img_lines))
 
     meta = document.get("metadata", {})
     if meta.get("author"):

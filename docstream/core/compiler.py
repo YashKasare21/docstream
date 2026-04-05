@@ -20,6 +20,7 @@ def compile_latex(
     latex_content: str,
     output_dir: str | Path,
     filename: str = "document",
+    image_dir: str | Path | None = None,
 ) -> tuple[Path, Path]:
     """
     Compile LaTeX content to PDF using XeLaTeX.
@@ -52,6 +53,13 @@ def compile_latex(
 
     with tempfile.TemporaryDirectory() as tmpdir:
         tmpdir = Path(tmpdir)
+
+        # Copy images to temp dir so xelatex can find them
+        if image_dir:
+            for img_file in Path(image_dir).glob("fig_p*.*"):
+                shutil.copy2(str(img_file), str(tmpdir))
+                logger.debug(f"Copied image: {img_file.name}")
+
         tex_file = tmpdir / f"{filename}.tex"
 
         # Ensure document is complete before compiling
