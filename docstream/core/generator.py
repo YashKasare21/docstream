@@ -355,12 +355,21 @@ def _generate_split(
         template, system_prompt, ai_provider,
     )
 
+    # Extract last section from Part 1 for context handoff
+    sections_in_part1 = re.findall(r'\\section\{([^}]+)\}', part1_latex)
+    last_section = sections_in_part1[-1] if sections_in_part1 else "Introduction"
+
     continuation_parts: list[str] = []
     for i, chunk in enumerate(chunks[1:], start=2):
         try:
             part = _generate_continuation(
                 chunk, i, len(chunks), system_prompt, ai_provider,
+                last_section_written=last_section,
             )
+            # Update last section for next part
+            new_sections = re.findall(r'\\section\{([^}]+)\}', part)
+            if new_sections:
+                last_section = new_sections[-1]
             continuation_parts.append(part)
         except Exception as e:
             logger.warning(f"Part {i} failed: {e}")
@@ -442,6 +451,7 @@ def _generate_continuation(
     total_parts: int,
     system_prompt: str,
     ai_provider: Any,
+    last_section_written: str = "",
 ) -> str:
     """Generate a continuation part (sections only)."""
     is_last = part_num == total_parts
@@ -451,18 +461,31 @@ def _generate_continuation(
         "End with % CONTINUES_NEXT_PART"
     )
 
+    context_hint = ""
+    if last_section_written:
+        context_hint = (
+            f"\nIMPORTANT CONTEXT:\n"
+            f'Part {part_num - 1} already covered up to and including '
+            f'the section: "{last_section_written}"\n'
+            f"DO NOT repeat or regenerate any sections already covered.\n"
+            f"Continue ONLY from where Part {part_num - 1} left off.\n"
+            f'Start with the NEXT section after "{last_section_written}".\n'
+        )
+
     prompt = (
         f"Continue this LaTeX document.\n"
         f"Generate ONLY the remaining sections from the content below.\n"
-        f"This is Part {part_num} of {total_parts}.\n\n"
+        f"This is Part {part_num} of {total_parts}.\n"
+        f"{context_hint}\n"
         f"CONTENT (Part {part_num}):\n{chunk}\n\n"
         f"RULES:\n"
         f"- Do NOT repeat documentclass, packages, title, or abstract\n"
-        f"- Start directly with \\section{{}} commands\n"
+        f"- Do NOT repeat sections already written in previous parts\n"
+        f'- Start directly with the NEXT \\section{{}} not yet written\n'
         f"- Convert [REF] entries to \\bibitem{{}} entries\n"
         f"- Replace [?] with \\cite{{refN}} sequentially\n"
         f"- {ending_rule}\n"
-        f"- Return only LaTeX sections, no preamble"
+        f"- Return only new LaTeX sections, no preamble"
     )
 
     raw = ai_provider.complete(prompt, system_prompt)
@@ -483,7 +506,36 @@ def _merge_all_parts(part1: str, continuation_parts: list[str]) -> str:
             ).rstrip()
             cleaned.append(part)
 
-    merged = '\n\n'.join(p for p in [part1] + cleaned if p)
+    # Track section titles seen in Part 1 for deduplication
+    seen_sections: set[str] = {
+        s.lower().strip()
+        for s in re.findall(r'\\section\{([^}]+)\}', part1)
+    }
+
+    # Remove duplicate sections from continuation parts
+    deduped: list[str] = []
+    for part in cleaned:
+        lines = part.split('\n')
+        filtered: list[str] = []
+        skip = False
+
+        for line in lines:
+            section_match = re.match(r'\\section\{([^}]+)\}', line.strip())
+            if section_match:
+                title = section_match.group(1).lower().strip()
+                if title in seen_sections:
+                    skip = True
+                    continue
+                else:
+                    seen_sections.add(title)
+                    skip = False
+
+            if not skip:
+                filtered.append(line)
+
+        deduped.append('\n'.join(filtered))
+
+    merged = '\n\n'.join(p for p in [part1] + deduped if p.strip())
 
     if '\\end{document}' not in merged:
         merged = merged.rstrip() + '\n\\end{document}'
