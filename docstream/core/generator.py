@@ -197,17 +197,29 @@ this strict order: (1) \\documentclass and packages, \
 (10) bibliography, (11) \\end{document} — MUST include. \
 If running long, SHORTEN SECTIONS — never skip \
 \\end{abstract} or \\end{document}.
-19. AUTHOR AFFILIATIONS — always include department and \
-institution in \\thanks{}. If the content has affiliation \
-lines (university, college, dept, email) near the author \
-names, include them. Format: \
-\\author{Name One\\thanks{Dept., University, City. Email: x@y.z} \
-\\and Name Two\\thanks{Dept., University.}} \
-NEVER omit affiliations when they appear in the content.
+19. AUTHOR AFFILIATIONS — the content contains [AFFILIATION] \
+tagged blocks. EVERY [AFFILIATION] block MUST appear in \
+\\thanks{} inside \\author{}. This is mandatory. \
+Format: \\author{Name One\\thanks{Affiliation text here. \
+Email: x@y.z} \\and Name Two\\thanks{Affiliation text.}} \
+Copy the [AFFILIATION] text verbatim — never omit it.
 20. CITATIONS must use \\cite{} ALWAYS. \
 NEVER use \\textsuperscript for citation numbers. \
 [1] → \\cite{ref1}, [1,2] → \\cite{ref1,ref2}. \
-This is non-negotiable."""
+This is non-negotiable.
+21. SECTION TITLES: Write full words in Title Case. \
+NEVER prefix section headings with Roman numerals or \
+split words with a leading letter. \
+CORRECT: \\section{Introduction} \
+WRONG: \\section{I. INTRODUCTION} \
+WRONG: \\section{I NTRODUCTION} \
+WRONG: \\section{INTRODUCTION}"""
+
+
+_AFFILIATION_KEYWORDS = (
+    'university', 'college', 'institute', 'department',
+    'dept', 'school', 'laboratory', 'lab',
+)
 
 
 def _build_content_parts(document: dict[str, Any]) -> list[str]:
@@ -218,7 +230,7 @@ def _build_content_parts(document: dict[str, Any]) -> list[str]:
     if meta.get("author"):
         content_parts.append(f"[AUTHOR]: {meta['author']}")
 
-    for block in document.get("structure", []):
+    for i, block in enumerate(document.get("structure", [])):
         block_type = block.get("type", "paragraph")
         text = block.get("text", "").strip()
 
@@ -234,6 +246,16 @@ def _build_content_parts(document: dict[str, Any]) -> list[str]:
         elif block_type == "reference":
             content_parts.append(f"[REF] {text}")
         else:
+            # Tag affiliation/email blocks in the first 10 paragraphs
+            # so the AI knows to put them in \thanks{}
+            if i < 10:
+                has_email = '@' in text
+                is_affil = any(
+                    kw in text.lower() for kw in _AFFILIATION_KEYWORDS
+                )
+                if has_email or is_affil:
+                    content_parts.append(f"[AFFILIATION] {text}")
+                    continue
             content_parts.append(text)
 
     return content_parts
@@ -283,6 +305,7 @@ Replace every <<PLACEHOLDER>> with the appropriate content.
 - <<BIBLIOGRAPHY_BLOCK>> → formatted references
 - IEEE: <<AUTHORS_BLOCK>>, <<KEYWORDS>>, <<ACKNOWLEDGMENT_BLOCK>>
 - Report: <<AUTHOR>>, <<DATE>> (use \\today if not found)
+- [AFFILIATION] blocks → MUST appear in \\thanks{{}} inside \\author{{}}
 
 Return the complete LaTeX document now:"""
 
@@ -582,6 +605,14 @@ def _insert_figures(
     if not images:
         return latex
 
+    # Remove fbox placeholders left by _postprocess_latex — we are
+    # about to insert the real figures, so these boxes are redundant.
+    latex = re.sub(
+        r'\\fbox\{\\parbox\{[^}]+\}\{[^\}]*\[Figure:[^\]]*\][^\}]*\}\}',
+        '',
+        latex,
+    )
+
     # Determine the insertion boundary — priority order:
     # 1. \\begin{thebibliography}
     # 2. \\bibliography{
@@ -683,13 +714,17 @@ def _merge_all_parts(part1: str, continuation_parts: list[str]) -> str:
             ).rstrip()
             cleaned.append(part)
 
-    # Track section titles seen in Part 1 for deduplication
+    # Track section AND subsection titles seen in Part 1 for deduplication
     seen_sections: set[str] = {
         s.lower().strip()
         for s in re.findall(r'\\section\{([^}]+)\}', part1)
     }
+    seen_subsections: set[str] = {
+        s.lower().strip()
+        for s in re.findall(r'\\subsection\{([^}]+)\}', part1)
+    }
 
-    # Remove duplicate sections from continuation parts
+    # Remove duplicate sections/subsections from continuation parts
     deduped: list[str] = []
     for part in cleaned:
         lines = part.split('\n')
@@ -698,6 +733,9 @@ def _merge_all_parts(part1: str, continuation_parts: list[str]) -> str:
 
         for line in lines:
             section_match = re.match(r'\\section\{([^}]+)\}', line.strip())
+            subsection_match = re.match(
+                r'\\subsection\{([^}]+)\}', line.strip()
+            )
             if section_match:
                 title = section_match.group(1).lower().strip()
                 if title in seen_sections:
@@ -706,6 +744,17 @@ def _merge_all_parts(part1: str, continuation_parts: list[str]) -> str:
                 else:
                     seen_sections.add(title)
                     skip = False
+            elif subsection_match:
+                title = subsection_match.group(1).lower().strip()
+                if title in seen_subsections:
+                    skip = True
+                    continue
+                else:
+                    seen_subsections.add(title)
+                    skip = False
+            elif skip and re.match(r'\\(?:sub)*section\{', line.strip()):
+                # Any new (sub)section ends the skip region
+                skip = False
 
             if not skip:
                 filtered.append(line)
@@ -1037,24 +1086,82 @@ def _postprocess_latex(latex: str) -> str:
     for pattern, replacement in undefined_fixes:
         latex = re.sub(pattern, replacement, latex)
 
-    # Fix 9: Clean Roman numeral prefixes from section headings
-    # AI sometimes produces \section{5 V. Future Work} or \section{IV. Intro}
+    # Fix 9: Clean section headings of Roman numeral prefixes and
+    # ALL-CAPS formatting. Also repairs Groq's word-splitting artifact
+    # where each word is prefixed with its first letter:
+    # "I NTRODUCTION" → "INTRODUCTION", "R ELATED W ORK" → "RELATED WORK"
     def _clean_section_title(match: re.Match) -> str:
         cmd = match.group(1)   # "section" or "subsection" etc.
         title = match.group(2)
-        # Strip leading "N V. " or "IV. " style prefixes
-        cleaned = re.sub(r'^\d*\s*[IVXivx]+\.\s+', '', title).strip()
-        # Strip leading single-letter prefix "A. " from subsections
+
+        # Repair Groq's word-split artifact: "X XXXX" → "XXXXX"
+        # Single uppercase letter + space + 2+ uppercase letters → rejoin
+        repaired = re.sub(r'\b([A-Z]) ([A-Z]{2,})\b', r'\1\2', title)
+        # Apply twice to catch consecutive split words
+        repaired = re.sub(r'\b([A-Z]) ([A-Z]{2,})\b', r'\1\2', repaired)
+
+        # Strip leading Roman numeral prefix "IV. " or "4 V. "
+        cleaned = re.sub(r'^\d*\s*[IVXivx]+\.\s+', '', repaired).strip()
+        # Strip leading single-letter dot prefix "A. "
         cleaned = re.sub(r'^[A-Z]\.\s+', '', cleaned).strip()
-        # Convert ALL-CAPS titles to Title Case (keep short acronyms intact)
-        if cleaned.isupper() and len(cleaned) > 4:
+
+        # Convert ALL-CAPS to Title Case only when no single-char fragments
+        words = cleaned.split()
+        all_caps = cleaned.isupper() and len(cleaned) > 4
+        has_fragments = any(len(w) == 1 for w in words)
+        if all_caps and not has_fragments:
             cleaned = cleaned.title()
+
         return f'\\{cmd}{{{cleaned}}}'
 
     latex = re.sub(
         r'\\((?:sub)*section\*?)\{([^}]+)\}',
         _clean_section_title,
         latex,
+    )
+
+    # Fix 10: Convert enumerate environments that look like subsection lists
+    # into proper \subsection{} commands. AI sometimes formats subsections
+    # as numbered enumerate items instead of \subsection{heading}\nparagraph.
+    def _promote_enumerate_to_subsections(match: re.Match) -> str:
+        content = match.group(1)
+        raw_items = re.split(r'\\item\s*', content)
+        items = [it for it in raw_items if it.strip()]
+        if len(items) < 2:
+            return match.group(0)
+
+        # Classify each item: heading-like if first line is short
+        heading_count = 0
+        for item in items:
+            first_line = item.split('\n')[0].strip()
+            first_line = re.sub(
+                r'^(?:\d+[.)]\s*|[a-zA-Z][.)]\s*)', '', first_line
+            ).strip()
+            if 3 < len(first_line) < 80:
+                heading_count += 1
+
+        if heading_count < len(items):
+            return match.group(0)  # Not all items look like headings
+
+        promoted: list[str] = []
+        for item in items:
+            lines = item.strip().split('\n', 1)
+            heading_text = re.sub(
+                r'^(?:\d+[.)]\s*|[a-zA-Z][.)]\s*)', '', lines[0].strip()
+            ).strip()
+            body = lines[1].strip() if len(lines) > 1 else ''
+            if heading_text:
+                promoted.append(f'\\subsection{{{heading_text}}}')
+            if body:
+                promoted.append(body)
+
+        return '\n'.join(promoted) if promoted else match.group(0)
+
+    latex = re.sub(
+        r'\\begin\{enumerate\}(.*?)\\end\{enumerate\}',
+        _promote_enumerate_to_subsections,
+        latex,
+        flags=re.DOTALL,
     )
 
     return latex
