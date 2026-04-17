@@ -75,6 +75,18 @@ def generate_latex(
 
     system_prompt = _build_system_prompt()
 
+    # Extract real bibliography BEFORE calling AI so we can
+    # replace whatever the AI generates with the real text.
+    real_bib = _extract_bibliography(document)
+    if real_bib:
+        ref_count = sum(
+            1 for b in document.get('structure', [])
+            if b.get('type') == 'reference'
+        )
+        logger.info(
+            f"Pre-extracted {ref_count} reference blocks for direct injection"
+        )
+
     # Build full content string once
     content_parts = _build_content_parts(document)
     full_content = '\n\n'.join(content_parts)
@@ -102,6 +114,10 @@ def generate_latex(
         # replacer) removes any AI-hallucinated \includegraphics
         # BEFORE _insert_figures adds the real ones.
         latex = _postprocess_latex(latex)
+
+    # Replace AI-generated (placeholder) bibliography with real extracted text
+    if real_bib:
+        latex = _replace_bibliography(latex, real_bib)
 
     images = document.get("images", [])
     if images and image_dir:
@@ -457,18 +473,27 @@ def _split_at_headings(content: str, n_parts: int) -> list[str]:
         if heading_match:
             split_pos = search_start + heading_match.start()
         else:
-            # Priority 2: split at next paragraph boundary after target
-            para_match = re.search(r'\n\n', remaining[split_target:])
-            if para_match:
-                split_pos = split_target + para_match.end()
+            # Priority 2a: split at sentence-ending paragraph break
+            # (avoids cutting mid-sentence when paragraph break is in
+            # the middle of a sentence due to extractor fragmentation)
+            sent_para = re.search(
+                r'[.!?][)\]"]?\s*\n\n', remaining[split_target:]
+            )
+            if sent_para:
+                split_pos = split_target + sent_para.end()
             else:
-                # Priority 3: split at next word boundary
-                split_pos = split_target
-                while (
-                    split_pos < len(remaining)
-                    and remaining[split_pos] not in (' ', '\n')
-                ):
-                    split_pos += 1
+                # Priority 2b: any paragraph break
+                para_match = re.search(r'\n\n', remaining[split_target:])
+                if para_match:
+                    split_pos = split_target + para_match.end()
+                else:
+                    # Priority 3: split at next word boundary
+                    split_pos = split_target
+                    while (
+                        split_pos < len(remaining)
+                        and remaining[split_pos] not in (' ', '\n')
+                    ):
+                        split_pos += 1
 
         parts.append(remaining[:split_pos].strip())
         remaining = remaining[split_pos:].strip()
@@ -537,10 +562,12 @@ def _generate_continuation(
     context_hint = ""
     if last_section_written:
         context_hint = (
-            f"\nCONTEXT: Part {part_num - 1} already wrote up to section: "
-            f'"{last_section_written}". '
-            f"Start IMMEDIATELY with the next section after that. "
-            f"Do NOT repeat or summarize previous content.\n"
+            f"\nCONTEXT: Part {part_num - 1} wrote up to (and may have ended "
+            f"mid-sentence within) section '{last_section_written}'. "
+            f"Continue the document from exactly where Part {part_num - 1} "
+            f"left off. If Part {part_num - 1} ended mid-sentence or "
+            f"mid-subsection, complete that thought first before starting "
+            f"new sections. Do NOT repeat content already written.\n"
         )
 
     # If this chunk contains [REF] lines, add explicit bibliography instruction
@@ -643,7 +670,7 @@ def _insert_figures(
             f"\n\\begin{{{env}}}[H]\n"
             f"\\centering\n"
             f"\\includegraphics[width={width}]{{{stem}}}\n"
-            f"\\caption{{Figure {fig_num}}}\n"
+            f"\\caption*{{Figure {fig_num}}}\n"
             f"\\label{{fig:{fig_num}}}\n"
             f"\\end{{{env}}}\n"
         )
@@ -707,11 +734,22 @@ def _merge_all_parts(part1: str, continuation_parts: list[str]) -> str:
     part1 = re.sub(r'%\s*CONTINUES_NEXT_PART.*', '', part1).rstrip()
 
     cleaned: list[str] = []
-    for part in continuation_parts:
+    for i, part in enumerate(continuation_parts):
         if part:
             part = re.sub(
                 r'%\s*CONTINUES_NEXT_PART.*', '', part
             ).rstrip()
+            # Strip any stray bibliography from non-final parts —
+            # Groq sometimes ignores the "no bibliography" instruction.
+            # The final part is responsible for the real bibliography.
+            is_final = (i == len(continuation_parts) - 1)
+            if not is_final:
+                part = re.sub(
+                    r'\\begin\{thebibliography\}.*?\\end\{thebibliography\}',
+                    '',
+                    part,
+                    flags=re.DOTALL,
+                )
             cleaned.append(part)
 
     # Track section AND subsection titles seen in Part 1 for deduplication
@@ -819,6 +857,75 @@ def _merge_latex_parts(part1: str, part2: str) -> str:
         part2 = part2.rstrip() + '\n\\end{document}'
 
     return part1 + '\n\n' + part2
+
+
+def _extract_bibliography(document: dict) -> str:
+    """
+    Extract real reference text from document structure
+    and format as a LaTeX thebibliography block.
+
+    Returns complete \\begin{thebibliography}...\\end block
+    or empty string if no references found.
+    """
+    refs = [
+        block for block in document.get('structure', [])
+        if block.get('type') == 'reference'
+    ]
+
+    if not refs:
+        return ""
+
+    lines = [f"\\begin{{thebibliography}}{{{len(refs)}}}"]
+
+    for i, ref in enumerate(refs, 1):
+        text = ref.get('text', '').strip()
+
+        # Remove leading [N] from reference text
+        text = re.sub(r'^\[\d+\]\s*', '', text)
+
+        # Escape LaTeX special chars (basic)
+        text = text.replace('&', '\\&')
+        text = text.replace('%', '\\%')
+        text = text.replace('#', '\\#')
+        text = text.replace('_', '\\_')
+
+        lines.append(f"\\bibitem{{ref{i}}}")
+        lines.append(text)
+        lines.append("")
+
+    lines.append("\\end{thebibliography}")
+    return '\n'.join(lines)
+
+
+def _replace_bibliography(latex: str, real_bib: str) -> str:
+    """
+    Replace AI-generated bibliography with real extracted one.
+    Called after AI generation if real_bib is non-empty.
+    """
+    if not real_bib:
+        return latex
+
+    bib_pattern = re.compile(
+        r'\\begin\{thebibliography\}.*?\\end\{thebibliography\}',
+        re.DOTALL,
+    )
+
+    if bib_pattern.search(latex):
+        latex = bib_pattern.sub(real_bib, latex)
+        logger.info("Replaced AI bibliography with extracted references")
+    else:
+        # No bibliography found — insert before \end{document}
+        end_doc = latex.rfind('\\end{document}')
+        if end_doc != -1:
+            latex = (
+                latex[:end_doc]
+                + '\n' + real_bib + '\n'
+                + latex[end_doc:]
+            )
+        else:
+            latex = latex + '\n' + real_bib
+
+    return latex
 
 
 def _preprocess_content(structured_content: str) -> str:
@@ -1163,5 +1270,23 @@ def _postprocess_latex(latex: str) -> str:
         latex,
         flags=re.DOTALL,
     )
+
+    # Fix 11: Remove inline \includegraphics not inside a figure environment.
+    # AI sometimes hallucinates \includegraphics mid-paragraph; these paths
+    # don't exist and XeLaTeX renders them as black rectangles.
+    result_lines: list[str] = []
+    in_figure = False
+    for line in latex.split('\n'):
+        if '\\begin{figure' in line:
+            in_figure = True
+        if '\\end{figure' in line:
+            in_figure = False
+            result_lines.append(line)
+            continue
+        if not in_figure and '\\includegraphics' in line:
+            logger.debug(f"Removed inline graphics: {line[:80]}")
+            continue
+        result_lines.append(line)
+    latex = '\n'.join(result_lines)
 
     return latex
