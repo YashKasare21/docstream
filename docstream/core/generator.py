@@ -732,6 +732,15 @@ def _insert_figures(
 def _merge_all_parts(part1: str, continuation_parts: list[str]) -> str:
     """Merge all generated parts into one complete LaTeX document."""
     part1 = re.sub(r'%\s*CONTINUES_NEXT_PART.*', '', part1).rstrip()
+    # Strip any bibliography Part 1 generated — it belongs only in the
+    # final part. AI sometimes emits a placeholder \begin{thebibliography}
+    # even though the prompt says not to include \end{document}.
+    part1 = re.sub(
+        r'\\begin\{thebibliography\}.*?\\end\{thebibliography\}',
+        '',
+        part1,
+        flags=re.DOTALL,
+    )
 
     cleaned: list[str] = []
     for i, part in enumerate(continuation_parts):
@@ -900,32 +909,75 @@ def _extract_bibliography(document: dict) -> str:
 def _replace_bibliography(latex: str, real_bib: str) -> str:
     """
     Replace AI-generated bibliography with real extracted one.
-    Called after AI generation if real_bib is non-empty.
+    Handles multiple bibliography blocks — removes ALL of them
+    and inserts a single real_bib before \\end{document}.
+    When real_bib is empty, deduplicates by keeping the last block.
     """
-    if not real_bib:
-        return latex
-
     bib_pattern = re.compile(
         r'\\begin\{thebibliography\}.*?\\end\{thebibliography\}',
         re.DOTALL,
     )
 
-    if bib_pattern.search(latex):
-        latex = bib_pattern.sub(real_bib, latex)
-        logger.info("Replaced AI bibliography with extracted references")
-    else:
+    if not real_bib:
+        # No extracted bibliography — deduplicate AI-generated ones by
+        # keeping only the last (final part's, most complete) bibliography.
+        all_bibs = list(bib_pattern.finditer(latex))
+        if len(all_bibs) > 1:
+            last_bib_text = all_bibs[-1].group(0)
+            # Remove all occurrences
+            latex = bib_pattern.sub('', latex)
+            # Re-insert the last (best) one before \end{document}
+            end_doc = latex.rfind('\\end{document}')
+            if end_doc != -1:
+                latex = (
+                    latex[:end_doc]
+                    + '\n' + last_bib_text + '\n'
+                    + latex[end_doc:]
+                )
+            logger.info(
+                f"Deduplicated {len(all_bibs)} bibliography blocks "
+                f"— kept final part's bibliography"
+            )
+        return latex
+
+    all_bibs = list(bib_pattern.finditer(latex))
+
+    if not all_bibs:
         # No bibliography found — insert before \end{document}
         end_doc = latex.rfind('\\end{document}')
         if end_doc != -1:
-            latex = (
+            return (
                 latex[:end_doc]
                 + '\n' + real_bib + '\n'
                 + latex[end_doc:]
             )
-        else:
-            latex = latex + '\n' + real_bib
+        return latex + '\n' + real_bib
 
-    return latex
+    if len(all_bibs) == 1:
+        result = bib_pattern.sub(real_bib, latex, count=1)
+        logger.info("Replaced AI bibliography with extracted references")
+        return result
+
+    # Multiple bibliographies — remove ALL, then insert real_bib once
+    result = latex
+    for bib_match in reversed(all_bibs):
+        result = result[:bib_match.start()] + result[bib_match.end():]
+
+    end_doc = result.rfind('\\end{document}')
+    if end_doc != -1:
+        result = (
+            result[:end_doc]
+            + '\n' + real_bib + '\n'
+            + result[end_doc:]
+        )
+    else:
+        result = result + '\n' + real_bib
+
+    logger.info(
+        f"Replaced {len(all_bibs)} bibliography blocks "
+        f"with extracted references"
+    )
+    return result
 
 
 def _preprocess_content(structured_content: str) -> str:
@@ -1288,5 +1340,23 @@ def _postprocess_latex(latex: str) -> str:
             continue
         result_lines.append(line)
     latex = '\n'.join(result_lines)
+
+    # Fix 12: Remove orphaned \caption{} lines outside figure environments.
+    # After Fix 11 strips inline \includegraphics, the AI's paired \caption{}
+    # lines are left behind as floating text in the paragraph flow.
+    caption_lines: list[str] = []
+    in_figure = False
+    for line in latex.split('\n'):
+        if '\\begin{figure' in line:
+            in_figure = True
+        if '\\end{figure' in line:
+            in_figure = False
+            caption_lines.append(line)
+            continue
+        if not in_figure and line.strip().startswith('\\caption{'):
+            logger.debug(f"Removed orphaned caption: {line[:80]}")
+            continue
+        caption_lines.append(line)
+    latex = '\n'.join(caption_lines)
 
     return latex
