@@ -30,22 +30,22 @@ def _make_block(block_type: BlockType, content: str = "test") -> Block:
 
 
 def test_pdf_handler_delegates_to_extractor():
-    """PDFHandler.extract() should return exactly what PDFExtractor.extract() returns."""
+    """PDFHandler.extract() should return blocks from extract_structured."""
     sample_blocks = [_make_block(BlockType.TEXT, "Hello PDF")]
 
-    with patch(
-        "docstream.core.format_handlers.pdf_handler.PDFExtractor"
-    ) as MockExtractor:
-        instance = MockExtractor.return_value
-        instance.extract.return_value = sample_blocks
+    with patch("docstream.core.format_handlers.pdf_handler.extract_structured") as mock_extract:
+        mock_extract.return_value = {
+            "title": "Test",
+            "metadata": {"page_count": 1, "is_scanned": False},
+            "structure": [{"type": "text", "text": "Hello PDF", "page": 1}],
+        }
 
         from docstream.core.format_handlers.pdf_handler import PDFHandler
 
         result = PDFHandler().extract(Path("doc.pdf"))
 
-    assert result == sample_blocks
-    MockExtractor.assert_called_once_with(Path("doc.pdf"))
-    instance.extract.assert_called_once()
+    assert len(result) == 1
+    mock_extract.assert_called_once()
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -166,9 +166,7 @@ def _mock_slide(title_text: str, body_texts: list[str], slide_num: int) -> Magic
         shape.text_frame.paragraphs = [para]
         body_shapes.append(shape)
 
-    slide.shapes.__iter__ = MagicMock(
-        return_value=iter([title_shape] + body_shapes)
-    )
+    slide.shapes.__iter__ = MagicMock(return_value=iter([title_shape] + body_shapes))
 
     # No speaker notes
     slide.notes_slide = None

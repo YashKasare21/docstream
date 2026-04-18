@@ -7,8 +7,8 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from docstream.core.extractor import PDFExtractor
-from docstream.models.document import Block
+from docstream.core.extractor_v2 import extract_structured
+from docstream.models.document import Block, BlockType
 
 
 class PDFHandler:
@@ -31,5 +31,20 @@ class PDFHandler:
         Raises:
             ExtractionError: If the file cannot be read or parsed.
         """
-        extractor = PDFExtractor(file_path)
-        return extractor.extract()
+        doc = extract_structured(str(file_path))
+        blocks = []
+        for item in doc.get("structure", []):
+            if item.get("type") == "heading":
+                block_type = BlockType.HEADING
+            elif item.get("type") == "table":
+                block_type = BlockType.TABLE
+            else:
+                block_type = BlockType.TEXT
+            blocks.append(
+                Block(
+                    type=block_type,
+                    content=item.get("text", ""),
+                    metadata={"page": item.get("page", 1)},
+                )
+            )
+        return blocks
