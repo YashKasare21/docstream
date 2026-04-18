@@ -28,7 +28,6 @@ import re
 import subprocess
 import tempfile
 from collections import Counter
-from typing import List
 
 from docstream.models.document import QualityReport
 
@@ -107,39 +106,29 @@ class QualityChecker:
         report = QualityReport()
 
         # ── Phase A: static analysis ──────────────────────────────────────
-        static_errors, static_warnings = self._static_analysis(
-            latex_content, template
-        )
+        static_errors, static_warnings = self._static_analysis(latex_content, template)
         report.errors.extend(static_errors)
         report.warnings.extend(static_warnings)
 
         # Technical score from static analysis
-        report.technical_score = max(
-            0.0, 1.0 - len(static_errors) * 0.3
-        )
+        report.technical_score = max(0.0, 1.0 - len(static_errors) * 0.3)
 
         # ── Phase B: compilation ──────────────────────────────────────────
         if not static_errors and not skip_compilation:
-            compile_errors, compile_warnings, log, success = (
-                self._compile_check(latex_content)
-            )
+            compile_errors, compile_warnings, log, success = self._compile_check(latex_content)
             report.errors.extend(compile_errors)
             report.warnings.extend(compile_warnings)
             report.latex_log = log
             report.compiled_successfully = success
 
             if not success:
-                report.technical_score = max(
-                    0.0, report.technical_score - 0.4
-                )
+                report.technical_score = max(0.0, report.technical_score - 0.4)
         elif skip_compilation:
             # Optimistically mark compilation as passing when static passes
             report.compiled_successfully = not bool(static_errors)
 
         # ── Professional checks ───────────────────────────────────────────
-        prof_errors, prof_warnings = self._professional_check(
-            latex_content, template
-        )
+        prof_errors, prof_warnings = self._professional_check(latex_content, template)
         report.errors.extend(prof_errors)
         report.warnings.extend(prof_warnings)
 
@@ -152,8 +141,7 @@ class QualityChecker:
             2,
         )
         report.passed = report.overall_score >= 0.6 and not any(
-            "blocking" in e.lower() or "fatal" in e.lower()
-            for e in report.errors
+            "blocking" in e.lower() or "fatal" in e.lower() for e in report.errors
         )
 
         return report
@@ -162,9 +150,7 @@ class QualityChecker:
     # Phase A — static analysis
     # -------------------------------------------------------------------------
 
-    def _static_analysis(
-        self, latex: str, template: str
-    ) -> tuple[list[str], list[str]]:
+    def _static_analysis(self, latex: str, template: str) -> tuple[list[str], list[str]]:
         """Fast checks that require no compilation.
 
         Returns:
@@ -197,18 +183,13 @@ class QualityChecker:
             "",
         )
         if first_content and not first_content.startswith(r"\documentclass"):
-            warnings.append(
-                r"\documentclass should be the first command in the document."
-            )
+            warnings.append(r"\documentclass should be the first command in the document.")
 
         # 5. Unmatched math-mode delimiter ($)
         # Count raw $ minus escaped \$
         dollar_count = latex.count("$") - latex.count(r"\$")
         if dollar_count % 2 != 0:
-            errors.append(
-                "Unmatched $ — math mode may be unclosed. "
-                "Check all $ signs are paired."
-            )
+            errors.append("Unmatched $ — math mode may be unclosed. Check all $ signs are paired.")
 
         # 6. Template-specific package hints (non-blocking)
         for pkg in self.TEMPLATE_REQUIRED_PACKAGES.get(template, []):
@@ -239,13 +220,9 @@ class QualityChecker:
             b = begin_counts.get(env, 0)
             e = end_counts.get(env, 0)
             if b > e:
-                errors.append(
-                    f"Unmatched \\begin{{{env}}}: {b} opens, {e} closes."
-                )
+                errors.append(f"Unmatched \\begin{{{env}}}: {b} opens, {e} closes.")
             elif e > b:
-                errors.append(
-                    f"Unmatched \\end{{{env}}}: {e} closes, {b} opens."
-                )
+                errors.append(f"Unmatched \\end{{{env}}}: {e} closes, {b} opens.")
 
         return errors
 
@@ -253,9 +230,7 @@ class QualityChecker:
     # Phase B — compilation check
     # -------------------------------------------------------------------------
 
-    def _compile_check(
-        self, latex_content: str
-    ) -> tuple[list[str], list[str], str, bool]:
+    def _compile_check(self, latex_content: str) -> tuple[list[str], list[str], str, bool]:
         """Compile with xelatex in a temp directory and parse the log.
 
         Returns:
@@ -291,7 +266,7 @@ class QualityChecker:
                 )
 
                 if os.path.exists(log_path):
-                    with open(log_path, "r", encoding="utf-8", errors="replace") as fh:
+                    with open(log_path, encoding="utf-8", errors="replace") as fh:
                         log_text = fh.read()
 
                 success = os.path.exists(pdf_path)
@@ -316,14 +291,9 @@ class QualityChecker:
                 warnings = warnings[:10]
 
             except subprocess.TimeoutExpired:
-                errors.append(
-                    "[BLOCKING] LaTeX compilation timed out after 60 seconds."
-                )
+                errors.append("[BLOCKING] LaTeX compilation timed out after 60 seconds.")
             except FileNotFoundError:
-                errors.append(
-                    "xelatex not found. Install TeX Live: "
-                    "sudo apt install texlive-xetex"
-                )
+                errors.append("xelatex not found. Install TeX Live: sudo apt install texlive-xetex")
 
         return errors, warnings, log_text, success
 
@@ -331,9 +301,7 @@ class QualityChecker:
     # Professional checks
     # -------------------------------------------------------------------------
 
-    def _professional_check(
-        self, latex: str, template: str
-    ) -> tuple[list[str], list[str]]:
+    def _professional_check(self, latex: str, template: str) -> tuple[list[str], list[str]]:
         """Soft quality checks — output works but may look poor.
 
         Returns:
@@ -346,26 +314,16 @@ class QualityChecker:
         text_only = re.sub(r"\\[a-zA-Z]+(\{[^}]*\})*", " ", latex)
         word_count = len(text_only.split())
         if word_count < 100:
-            warnings.append(
-                "Document content appears very short. "
-                "Consider adding more detail."
-            )
+            warnings.append("Document content appears very short. Consider adding more detail.")
 
         # 2. Sections present for report/ieee templates
-        sections = re.findall(
-            r"\\(?:section|subsection)\{([^}]+)\}", latex
-        )
+        sections = re.findall(r"\\(?:section|subsection)\{([^}]+)\}", latex)
         if not sections and template in ("report", "ieee"):
-            warnings.append(
-                f"Template '{template}' typically has sections "
-                "but none were found."
-            )
+            warnings.append(f"Template '{template}' typically has sections but none were found.")
 
         # 3. Title or name command
         if r"\title{" not in latex and r"\name{" not in latex:
-            warnings.append(
-                "No title or name command found. Consider adding one."
-            )
+            warnings.append("No title or name command found. Consider adding one.")
 
         # 4. IEEE-specific checks
         if template == "ieee":
@@ -387,15 +345,11 @@ class QualityChecker:
         # 6. Placeholder text
         if "lorem ipsum" in latex.lower():
             warnings.append(
-                "Document contains placeholder text ('lorem ipsum'). "
-                "Replace with real content."
+                "Document contains placeholder text ('lorem ipsum'). Replace with real content."
             )
 
         # 7. Developer markers
         if "TODO" in latex or "FIXME" in latex:
-            warnings.append(
-                "Document contains TODO/FIXME markers. "
-                "Remove before final output."
-            )
+            warnings.append("Document contains TODO/FIXME markers. Remove before final output.")
 
         return errors, warnings

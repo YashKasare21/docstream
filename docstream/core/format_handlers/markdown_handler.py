@@ -17,7 +17,7 @@ _HEADING_LEVELS = [
     (re.compile(r"^#{4}\s+(.+)$"), 14.0),  # ####
     (re.compile(r"^#{3}\s+(.+)$"), 16.0),  # ###
     (re.compile(r"^#{2}\s+(.+)$"), 20.0),  # ##
-    (re.compile(r"^#\s+(.+)$"), 24.0),     # #
+    (re.compile(r"^#\s+(.+)$"), 24.0),  # #
 ]
 
 _LIST_RE = re.compile(r"^[-*+]\s+(.+)$|^(\d+)\.\s+(.+)$")
@@ -50,8 +50,7 @@ class MarkdownHandler:
             text = file_path.read_text(encoding="utf-8")
         except UnicodeDecodeError as exc:
             raise ExtractionError(
-                "Could not read Markdown file. "
-                "Please ensure the file is UTF-8 encoded."
+                "Could not read Markdown file. Please ensure the file is UTF-8 encoded."
             ) from exc
 
         blocks: list[Block] = []

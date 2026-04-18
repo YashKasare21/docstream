@@ -33,11 +33,10 @@ class ImageHandler:
                              fewer than 20 characters.
         """
         try:
-            from PIL import Image, UnidentifiedImageError  # Pillow
+            from PIL import Image  # Pillow
         except ImportError as exc:
             raise ExtractionError(
-                "Pillow is required for image extraction. "
-                "Install with: pip install Pillow"
+                "Pillow is required for image extraction. Install with: pip install Pillow"
             ) from exc
 
         try:
@@ -53,8 +52,7 @@ class ImageHandler:
             img = Image.open(file_path)
         except Exception as exc:
             raise ExtractionError(
-                "Could not open image file. "
-                "Supported formats: JPG, PNG."
+                "Could not open image file. Supported formats: JPG, PNG."
             ) from exc
 
         # Pre-process: grayscale

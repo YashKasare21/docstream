@@ -12,7 +12,6 @@ from pathlib import Path
 import pytest
 
 import docstream
-from docstream import ConversionResult
 from docstream.models.document import (
     BlockType,
     DocumentAST,

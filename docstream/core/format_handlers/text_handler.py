@@ -70,9 +70,7 @@ class TextHandler:
             try:
                 text = file_path.read_text(encoding="latin-1")
             except Exception as exc:
-                raise ExtractionError(
-                    f"Could not read text file: {file_path.name}"
-                ) from exc
+                raise ExtractionError(f"Could not read text file: {file_path.name}") from exc
 
         raw_paragraphs = text.split("\n\n")
         blocks: list[Block] = []

@@ -1,0 +1,196 @@
+\documentclass[12pt, a4paper]{article}
+\usepackage[margin=2.5cm]{geometry}
+% Font encoding — compatible with XeLaTeX
+\usepackage{fontspec}
+\defaultfontfeatures{Ligatures=TeX}
+\usepackage{booktabs}
+\usepackage{graphicx}
+\usepackage{amsmath}
+\usepackage{float}
+\usepackage{setspace}
+\usepackage[hidelinks]{hyperref}
+\usepackage{textcomp} % For \textdagger and \textdaggerdbl
+\onehalfspacing
+
+\title{Attention Is All You Need}
+\author{Ashish Vaswani\thanks{Google Brain}\textsuperscript{*} \and Noam Shazeer\thanks{Google Brain}\textsuperscript{*} \and Niki Parmar\thanks{Google Research}\textsuperscript{*} \and Jakob Uszkoreit\thanks{Google Research}\textsuperscript{*} \and Llion Jones\thanks{Google Research}\textsuperscript{*} \and Aidan N. Gomez\thanks{University of Toronto}\textsuperscript{*}\textsuperscript{\textdagger} \and Łukasz Kaiser\thanks{Google Brain}\textsuperscript{*} \and Illia Polosukhin\textsuperscript{*}\textsuperscript{\textdaggerdbl}}
+\date{2 Aug 2023}
+
+\begin{document}
+
+\maketitle
+
+\footnotetext{\textsuperscript{*}Equal contribution. Listing order is random. Jakob proposed replacing RNNs with self-attention and started the effort to evaluate this idea. Ashish, with Illia, designed and implemented the first Transformer models and has been crucially involved in every aspect of this work. Noam proposed scaled dot-product attention, multi-head attention and the parameter-free position representation and became the other person involved in nearly every detail. Niki designed, implemented, tuned and evaluated countless model variants in our original codebase and tensor2tensor. Llion also experimented with novel model variants, was responsible for our initial codebase, and efficient inference and visualizations. Lukasz and Aidan spent countless long days designing various parts of and implementing tensor2tensor, replacing our earlier codebase, greatly improving results and massively accelerating our research.}
+\footnotetext{\textsuperscript{\textdagger}Work performed while at Google Brain.}
+\footnotetext{\textsuperscript{\textdaggerdbl}Work performed while at Google Research.}
+\footnotetext{31st Conference on Neural Information Processing Systems (NIPS 2017), Long Beach, CA, USA.}
+
+\begin{abstract}
+The dominant sequence transduction models are based on complex recurrent or convolutional neural networks that include an encoder and a decoder. The best performing models also connect the encoder and decoder through an attention mechanism. We propose a new simple network architecture, the Transformer, based solely on attention mechanisms, dispensing with recurrence and convolutions entirely. Experiments on two machine translation tasks show these models to be superior in quality while being more parallelizable and requiring significantly less time to train. Our model achieves 28.4 BLEU on the WMT 2014 English
+
+\section{Introduction}
+The introduction and earlier sections of this paper were covered in Part 1. This document continues with a detailed analysis of the Transformer's design choices, training, and experimental results.
+
+\section{Why Self-Attention}
+In this section we compare various aspects of self-attention layers to the recurrent and convolutional layers commonly used for mapping one variable-length sequence of symbol representations ($x_1,..., x_n$) to another sequence of equal length ($z_1,..., z_n$), with $x_i, z_i \in \mathbb{R}^d$, such as a hidden layer in a typical sequence transduction encoder or decoder. Motivating our use of self-attention we consider three desiderata.
+
+One is the total computational complexity per layer. Another is the amount of computation that can be parallelized, as measured by the minimum number of sequential operations required.
+
+The third is the path length between long-range dependencies in the network. Learning long-range dependencies is a key challenge in many sequence transduction tasks. One key factor affecting the ability to learn such dependencies is the length of the paths forward and backward signals have to traverse in the network. The shorter these paths between any combination of positions in the input and output sequences, the easier it is to learn long-range dependencies [12]. Hence we also compare the maximum path length between any two input and output positions in networks composed of the different layer types.
+
+As noted in Table 1, a self-attention layer connects all positions with a constant number of sequentially executed operations, whereas a recurrent layer requires $O(n)$ sequential operations. In terms of computational complexity, self-attention layers are faster than recurrent layers when the sequence length $n$ is smaller than the representation dimensionality $d$, which is most often the case with sentence representations used by state-of-the-art models in machine translations, such as word-piece [38] and byte-pair [31] representations. To improve computational performance for tasks involving very long sequences, self-attention could be restricted to considering only a neighborhood of size $r$ in the input sequence centered around the respective output position. This would increase the maximum path length to $O(n/r)$. We plan to investigate this approach further in future work.
+
+A single convolutional layer with kernel width $k < n$ does not connect all pairs of input and output positions. Doing so requires a stack of $O(n/k)$ convolutional layers in the case of contiguous kernels, or $O(\log_k(n))$ in the case of dilated convolutions [18], increasing the length of the longest paths between any two positions in the network. Convolutional layers are generally more expensive than recurrent layers, by a factor of $k$. Separable convolutions \cite{ref6}, however, decrease the complexity considerably, to $O(k \cdot n \cdot d + n \cdot d^2)$. Even with $k = n$, however, the complexity of a separable convolution is equal to the combination of a self-attention layer and a point-wise feed-forward layer, the approach we take in our model.
+
+As side benefit, self-attention could yield more interpretable models. We inspect attention distributions from our models and present and discuss examples in the appendix. Not only do individual attention heads clearly learn to perform different tasks, many appear to exhibit behavior related to the syntactic and semantic structure of the sentences.
+
+\section{Training}
+This section describes the training regime for our models.
+
+\subsection{Training Data and Batching}
+We trained on the standard WMT 2014 English-German dataset consisting of about 4.5 million sentence pairs. Sentences were encoded using byte-pair encoding \cite{ref3}, which has a shared source-target vocabulary of about 37000 tokens. For English-French, we used the significantly larger WMT 2014 English-French dataset consisting of 36M sentences and split tokens into a 32000 word-piece vocabulary [38]. Sentence pairs were batched together by approximate sequence length. Each training batch contained a set of sentence pairs containing approximately 25000 source tokens and 25000 target tokens.
+
+\subsection{Hardware and Schedule}
+We trained our models on one machine with 8 NVIDIA P100 GPUs. For our base models using the hyperparameters described throughout the paper, each training step took about 0.4 seconds. We trained the base models for a total of 100,000 steps or 12 hours. For our big models, (described on the bottom line of table 3), step time was 1.0 seconds. The big models were trained for 300,000 steps (3.5 days).
+
+\subsection{Optimizer}
+We used the Adam optimizer [20] with $\beta_1 = 0.9$, $\beta_2 = 0.98$ and $\epsilon = 10^{-9}$. We varied the learning rate over the course of training, according to the formula:
+\begin{equation}
+\label{eq:lrate}
+\text{lrate} = d_{\text{model}}^{-0.5} \cdot \min(\text{step\_num}^{-0.5}, \text{step\_num} \cdot \text{warmup\_steps}^{-1.5})
+\end{equation}
+This corresponds to increasing the learning rate linearly for the first $\text{warmup\_steps}$ training steps, and decreasing it thereafter proportionally to the inverse square root of the step number. We used $\text{warmup\_steps} = 4000$.
+
+\subsection{Regularization}
+We employ three types of regularization during training:
+
+\begin{table}[htbp]
+\caption{The Transformer achieves better BLEU scores than previous state-of-the-art models on the English-to-German and English-to-French newstest2014 tests at a fraction of the training cost.}
+\centering
+\begin{tabular}{lcccc}
+\toprule
+Model & \multicolumn{2}{c}{BLEU} & \multicolumn{2}{c}{Training Cost (FLOPs)} \\
+\cmidrule(lr){2-3} \cmidrule(lr){4-5}
+& EN-DE & EN-FR & EN-DE & EN-FR \\
+\midrule
+ByteNet [18] & 23.75 & - & - & - \\
+Deep-Att + PosUnk [39] & - & 39.2 & - & \num{1.0e20} \\
+GNMT + RL [38] & 24.6 & 39.92 & \num{2.3e19} & \num{1.4e20} \\
+ConvS2S \cite{ref9} & 25.16 & 40.46 & \num{9.6e18} & \num{1.5e20} \\
+MoE [32] & 26.03 & 40.56 & \num{2.0e19} & \num{1.2e20} \\
+Deep-Att + PosUnk Ensemble [39] & - & 40.4 & - & \num{8.0e20} \\
+GNMT + RL Ensemble [38] & 26.30 & 41.16 & \num{1.8e20} & \num{1.1e21} \\
+ConvS2S Ensemble \cite{ref9} & 26.36 & 41.29 & \num{7.7e19} & \num{1.2e21} \\
+Transformer (base model) & 27.3 & 38.1 & \num{3.3e18} & - \\
+Transformer (big) & 28.4 & 41.8 & \num{2.3e19} & - \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\textbf{Residual Dropout} We apply dropout [33] to the output of each sub-layer, before it is added to the sub-layer input and normalized. In addition, we apply dropout to the sums of the embeddings and the positional encodings in both the encoder and decoder stacks. For the base model, we use a rate of $P_{\text{drop}} = 0.1$.
+
+\textbf{Label Smoothing} During training, we employed label smoothing of value $\epsilon_{\text{ls}} = 0.1$ [36]. This hurts perplexity, as the model learns to be more unsure, but improves accuracy and BLEU score.
+
+\section{Results}
+
+\subsection{Machine Translation}
+On the WMT 2014 English-to-German translation task, the big transformer model (Transformer (big) in Table 2) outperforms the best previously reported models (including ensembles) by more than 2.0 BLEU, establishing a new state-of-the-art BLEU score of 28.4. The configuration of this model is listed in the bottom line of Table 3. Training took 3.5 days on 8 P100 GPUs. Even our base model surpasses all previously published models and ensembles, at a fraction of the training cost of any of the competitive models.
+
+On the WMT 2014 English-to-French translation task, our big model achieves a BLEU score of 41.0, outperforming all of the previously published single models, at less than 1/4 the training cost of the previous state-of-the-art model. The Transformer (big) model trained for English-to-French used dropout rate $P_{\text{drop}} = 0.1$, instead of 0.3.
+
+For the base models, we used a single model obtained by averaging the last 5 checkpoints, which were written at 10-minute intervals. For the big models, we averaged the last 20 checkpoints. We used beam search with a beam size of 4 and length penalty $\alpha = 0.6$ [38]. These hyperparameters were chosen after experimentation on the development set. We set the maximum output length during inference to input length + 50, but terminate early when possible [38].
+
+Table 2 summarizes our results and compares our translation quality and training costs to other model architectures from the literature. We estimate the number of floating point operations used to train a model by multiplying the training time, the number of GPUs used, and an estimate of the sustained single-precision floating-point capacity of each GPU\footnote{We used values of 2.8, 3.7, 6.0 and 9.5 TFLOPS for K80, K40, M40 and P100, respectively.}.
+
+\subsection{Model Variations}
+To evaluate the importance of different components of the Transformer, we varied our base model in different ways, measuring the change in performance on English-to-German translation on the development set, newstest2013. We used beam search as described in the previous section, but no checkpoint averaging. We present these results in Table 3.
+
+\begin{table}[htbp]
+\caption{Variations on the Transformer architecture. Unlisted values are identical to those of the base model. All metrics are on the English-to-German translation development set, newstest2013. Listed perplexities are per-wordpiece, according to our byte-pair encoding, and should not be compared to per-word perplexities.}
+\centering
+\begin{tabular}{@{}lcccccccccccS@{}}
+\toprule
+& N & $d_{\text{model}}$ & $d_{\text{ff}}$ & h & $d_k$ & $d_v$ & $P_{\text{drop}}$ & $\epsilon_{\text{ls}}$ & train steps & PPL (dev) & BLEU (dev) & {params ($\times 10^6$)} \\
+\midrule
+base & 6 & 512 & 2048 & 8 & 64 & 64 & 0.1 & 0.1 & 100K & 4.92 & 25.8 & 65 \\
+\midrule
+(A) & & & & 1 & 512 & 512 & & & & 5.29 & 24.9 & 4 \\
+& & & & 4 & 128 & 128 & & & & 5.00 & 25.5 & {20} \\ % Assuming params for h=4
+& & & & 16 & 32 & 32 & & & & 4.91 & 25.8 & {80} \\ % Assuming params for h=16
+& & & & 32 & 16 & 16 & & & & 5.01 & 25.4 & {160} \\ % Assuming params for h=32
+\midrule
+(B) & 6 & 512 & 2048 & 32 & 16 & 16 & 0.1 & 0.1 & 100K & 5.16 & 25.1 & 58 \\ % h=32 for d_k=16
+& 6 & 512 & 2048 & 16 & 32 & 32 & 0.1 & 0.1 & 100K & 5.01 & 25.4 & 60 \\ % h=16 for d_k=32
+\midrule
+(C) & 2 & 512 & 2048 & 8 & 64 & 64 & 0.1 & 0.1 & 100K & 6.11 & 23.7 & 36 \\
+& 4 & 512 & 2048 & 8 & 64 & 64 & 0.1 & 0.1 & 100K & 5.19 & 25.3 & 50 \\
+& 8 & 512 & 2048 & 8 & 64 & 64 & 0.1 & 0.1 & 100K & 4.88 & 25.5 & 80 \\
+& 6 & 256 & 32 & 32 & 32 & 32 & 0.1 & 0.1 & 100K & 5.75 & 24.5 & 28 \\ % d_model=256, d_ff=32, h=32, d_k=32, d_v=32
+& 6 & 1024 & 128 & 128 & 12
+
+\section{Attention Visualizations}
+
+\begin{figure}[htbp]
+    \centering
+    % The original content provides a visual representation of attention weights,
+    % which is difficult to reproduce accurately as a LaTeX table.
+    % This placeholder represents the visual attention map described in the caption.
+    \rule{\textwidth}{5cm} % Placeholder for the attention visualization image
+    \caption{An example of the attention mechanism following long-distance dependencies in the encoder self-attention in layer 5 of 6. Many of the attention heads attend to a distant dependency of the verb 'making', completing the phrase 'making...more difficult'. Attentions here shown only for the word 'making'. Different colors represent different heads. Best viewed in color.}
+    \label{fig:attention_long_distance}
+\end{figure}
+
+\begin{figure}[htbp]
+    \centering
+    % The original content provides a visual representation of attention weights,
+    % which is difficult to reproduce accurately as a LaTeX table.
+    % This placeholder represents the visual attention map described in the caption.
+    \rule{\textwidth}{5cm} % Placeholder for the attention visualization image
+    \caption{Two attention heads, also in layer 5 of 6, apparently involved in anaphora resolution. Top: Full attentions for head 5. Bottom: Isolated attentions from just the word 'its' for attention heads 5 and 6. Note that the attentions are very sharp for this word.}
+    \label{fig:attention_anaphora}
+\end{figure}
+
+\begin{figure}[htbp]
+    \centering
+    % The original content provides a visual representation of attention weights,
+    % which is difficult to reproduce accurately as a LaTeX table.
+    % This placeholder represents the visual attention map described in the caption.
+    \rule{\textwidth}{5cm} % Placeholder for the attention visualization image
+    \caption{Many of the attention heads exhibit behaviour that seems related to the structure of the sentence. We give two such examples above, from two different heads from the encoder self-attention at layer 5 of 6. The heads clearly learned to perform different tasks.}
+    \label{fig:attention_structure}
+\end{figure}
+
+\begin{thebibliography}{99}
+\bibitem{ref10} Alex Graves. Generating sequences with recurrent neural networks. \textit{arXiv preprint arXiv:1308.0850}, 2013.
+\bibitem{ref11} Kaiming He, Xiangyu Zhang, Shaoqing Ren, and Jian Sun. Deep residual learning for image recognition. In \textit{Proceedings of the IEEE Conference on Computer Vision and Pattern Recognition}, pages 770--778, 2016.
+\bibitem{ref12} Sepp Hochreiter, Yoshua Bengio, Paolo Frasconi, and Jürgen Schmidhuber. Gradient flow in recurrent nets: the difficulty of learning long-term dependencies, 2001.
+\bibitem{ref13} Sepp Hochreiter and Jürgen Schmidhuber. Long short-term memory. \textit{Neural computation}, 9(8):1735--1780, 1997.
+\bibitem{ref14} Zhongqiang Huang and Mary Harper. Self-training PCFG grammars with latent annotations across languages. In \textit{Proceedings of the 2009 Conference on Empirical Methods in Natural Language Processing}, pages 832--841. ACL, August 2009.
+\bibitem{ref15} Rafal Jozefowicz, Oriol Vinyals, Mike Schuster, Noam Shazeer, and Yonghui Wu. Exploring the limits of language modeling. \textit{arXiv preprint arXiv:1602.02410}, 2016.
+\bibitem{ref16} Łukasz Kaiser and Samy Bengio. Can active memory replace attention? In \textit{Advances in Neural Information Processing Systems, (NIPS)}, 2016.
+\bibitem{ref17} Łukasz Kaiser and Ilya Sutskever. Neural GPUs learn algorithms. In \textit{International Conference on Learning Representations (ICLR)}, 2016.
+\bibitem{ref18} Nal Kalchbrenner, Lasse Espeholt, Karen Simonyan, Aaron van den Oord, Alex Graves, and Koray Kavukcuoglu. Neural machine translation in linear time. \textit{arXiv preprint arXiv:1610.10099v2}, 2017.
+\bibitem{ref19} Yoon Kim, Carl Denton, Luong Hoang, and Alexander M. Rush. Structured attention networks. In \textit{International Conference on Learning Representations}, 2017.
+\bibitem{ref20} Diederik Kingma and Jimmy Ba. Adam: A method for stochastic optimization. In \textit{ICLR}, 2015.
+\bibitem{ref21} Oleksii Kuchaiev and Boris Ginsburg. Factorization tricks for LSTM networks. \textit{arXiv preprint arXiv:1703.10722}, 2017.
+\bibitem{ref22} Zhouhan Lin, Minwei Feng, Cicero Nogueira dos Santos, Mo Yu, Bing Xiang, Bowen Zhou, and Yoshua Bengio. A structured self-attentive sentence embedding. \textit{arXiv preprint arXiv:1703.03130}, 2017.
+\bibitem{ref23} Minh-Thang Luong, Quoc V. Le, Ilya Sutskever, Oriol Vinyals, and Lukasz Kaiser. Multi-task sequence to sequence learning. \textit{arXiv preprint arXiv:1511.06114}, 2015.
+\bibitem{ref24} Minh-Thang Luong, Hieu Pham, and Christopher D Manning. Effective approaches to attentionbased neural machine translation. \textit{arXiv preprint arXiv:1508.04025}, 2015.
+\bibitem{ref25} Mitchell P Marcus, Mary Ann Marcinkiewicz, and Beatrice Santorini. Building a large annotated corpus of english: The penn treebank. \textit{Computational linguistics}, 19(2):313--330, 1993.
+\bibitem{ref26} David McClosky, Eugene Charniak, and Mark Johnson. Effective self-training for parsing. In \textit{Proceedings of the Human Language Technology Conference of the NAACL, Main Conference}, pages 152--159. ACL, June 2006.
+\bibitem{ref27} Ankur Parikh, Oscar Täckström, Dipanjan Das, and Jakob Uszkoreit. A decomposable attention model. In \textit{Empirical Methods in Natural Language Processing}, 2016.
+\bibitem{ref28} Romain Paulus, Caiming Xiong, and Richard Socher. A deep reinforced model for abstractive summarization. \textit{arXiv preprint arXiv:1705.04304}, 2017.
+\bibitem{ref29} Slav Petrov, Leon Barrett, Romain Thibaux, and Dan Klein. Learning accurate, compact, and interpretable tree annotation. In \textit{Proceedings of the 21st International Conference on Computational Linguistics and 44th Annual Meeting of the ACL}, pages 433--440. ACL, July 2006.
+\bibitem{ref30} Ofir Press and Lior Wolf. Using the output embedding to improve language models. \textit{arXiv preprint arXiv:1608.05859}, 2016.
+\bibitem{ref31} Rico Sennrich, Barry Haddow, and Alexandra Birch. Neural machine translation of rare words with subword units. \textit{arXiv preprint arXiv:1508.07909}, 2015.
+\bibitem{ref32} Noam Shazeer, Azalia Mirhoseini, Krzysztof Maziarz, Andy Davis, Quoc Le, Geoffrey Hinton, and Jeff Dean. Outrageously large neural networks: The sparsely-gated mixture-of-experts layer. \textit{arXiv preprint arXiv:1701.06538}, 2017.
+\bibitem{ref33} Nitish Srivastava, Geoffrey E Hinton, Alex Krizhevsky, Ilya Sutskever, and Ruslan Salakhutdinov. Dropout: a simple way to prevent neural networks from overfitting. \textit{Journal of Machine Learning Research}, 15(1):1929--1958, 2014.
+\bibitem{ref34} Sainbayar Sukhbaatar, Arthur Szlam, Jason Weston, and Rob Fergus. End-to-end memory networks. In C. Cortes, N. D. Lawrence, D. D. Lee, M. Sugiyama, and R. Garnett, editors, \textit{Advances in Neural Information Processing Systems 28}, pages 2440--2448. Curran Associates, Inc., 2015.
+\bibitem{ref35} Ilya Sutskever, Oriol Vinyals, and Quoc VV Le. Sequence to sequence learning with neural networks. In \textit{Advances in Neural Information Processing Systems}, pages 3104--3112, 2014.
+\bibitem{ref36} Christian Szegedy, Vincent Vanhoucke, Sergey Ioffe, Jonathon Shlens, and Zbigniew Wojna. Rethinking the inception architecture for computer vision. \textit{CoRR, abs/1512.00567}, 2015.
+\bibitem{ref37} Vinyals \& Kaiser, Koo, Petrov, Sutskever, and Hinton. Grammar as a foreign language. In \textit{Advances in Neural Information Processing Systems}, 2015.
+\bibitem{ref38} Yonghui Wu, Mike Schuster, Zhifeng Chen, Quoc V Le, Mohammad Norouzi, Wolfgang Macherey, Maxim Krikun, Yuan Cao, Qin Gao, Klaus Macherey, et al. Google's neural machine translation system: Bridging the gap between human and machine translation. \textit{arXiv preprint arXiv:1609.08144}, 2016.
+\bibitem{ref39} Jie Zhou, Ying Cao, Xuguang Wang, Peng Li, and Wei Xu. Deep recurrent models with fast-forward connections for neural machine translation. \textit{CoRR, abs/1606.04199}, 2016.
+\bibitem{ref40} Muhua Zhu, Yue Zhang, Wenliang Chen, Min Zhang, and Jingbo Zhu. Fast and accurate shift-reduce constituent parsing. In \textit{Proceedings of the 51st Annual Meeting of the ACL (Volume 1: Long Papers)}, pages 434--443. ACL, August 2013.
+\end{thebibliography}
+\end{document}

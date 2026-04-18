@@ -14,7 +14,6 @@ import pytest
 from docstream.exceptions import ExtractionError
 from docstream.models.document import Block, BlockType
 
-
 # ─────────────────────────────────────────────────────────────────────────────
 # Helpers
 # ─────────────────────────────────────────────────────────────────────────────
@@ -31,8 +30,6 @@ def _make_block(block_type: BlockType, content: str = "test") -> Block:
 
 def test_pdf_handler_delegates_to_extractor():
     """PDFHandler.extract() should return blocks from extract_structured."""
-    sample_blocks = [_make_block(BlockType.TEXT, "Hello PDF")]
-
     with patch("docstream.core.format_handlers.pdf_handler.extract_structured") as mock_extract:
         mock_extract.return_value = {
             "title": "Test",

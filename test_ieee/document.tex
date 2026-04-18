@@ -1,0 +1,59 @@
+\documentclass[conference]{IEEEtran}
+\IEEEoverridecommandlockouts
+\usepackage{cite}
+\usepackage{amsmath,amssymb,amsfonts}
+\usepackage{graphicx}
+\usepackage{textcomp}
+\usepackage{xcolor}
+\usepackage{hyperref}
+\usepackage{booktabs}
+\def\BibTeX{{\rm B\kern-.05em{\sc i\kern-.025em b}\kern-.08em
+    T\kern-.1667em\lower.7ex\hbox{E}\kern-.125emX}}
+\begin{document}
+
+\title{Attention Is All You Need}
+
+\author{
+\IEEEauthorblockN{Ashish Vaswani\textsuperscript{1}, Noam Shazeer\textsuperscript{1}, Niki Parmar\textsuperscript{2}, Jakob Uszkoreit\textsuperscript{2}, Llion Jones\textsuperscript{2}, Aidan N. Gomez\textsuperscript{3}, \L{}ukasz Kaiser\textsuperscript{1}, Illia Polosukhin\textsuperscript{2}}
+\IEEEauthorblockA{\textsuperscript{1}Google Brain\\ \textsuperscript{2}Google Research\\ \textsuperscript{3}University of Toronto\\ avaswani@google.com, noam@google.com, nikip@google.com, usz@google.com, llion@google.com, aidan@cs.toronto.edu, lukaszkaiser@google.com, illia.polosukhin@gmail.com}
+}
+
+\maketitle
+
+\begin{abstract}
+The dominant sequence transduction models are based on complex recurrent or convolutional neural networks. The best performing models connect encoder and decoder through attention. We propose a new simple network architecture, the Transformer, based solely on attention mechanisms, entirely dispensing with recurrence and convolutions. Experiments on two machine translation tasks show these models to be superior in quality, more parallelizable, and require significantly less training time. Our model achieves 28.4 BLEU on WMT 2014 English-to-German, improving over existing best results by over 2 BLEU. On WMT 2014 English-to-French, it sets a new single-model state-of-the-art BLEU score of 41.8 after 3.5 days on eight GPUs, a fraction of previous training costs. The Transformer generalizes well to other tasks, successfully applied to English constituency parsing with both large and limited training data. This work involved equal contributions from multiple authors, with key roles in design, implementation, and evaluation of the Transformer architecture and its development in tensor2tensor.
+\end{abstract}
+
+\begin{IEEEkeywords}
+attention mechanisms, sequence transduction, machine translation, Transformer, neural networks, deep learning
+\end{IEEEkeywords}
+
+\section{INTRODUCTION}
+Recurrent neural networks, particularly long short-term memory \cite{ref13} and gated recurrent neural networks, have been firmly established as state-of-the-art approaches in sequence modeling and transduction problems such as language modeling and machine translation \cite{ref35}. Numerous efforts have since continued to push the boundaries of recurrent language models and encoder-decoder architectures \cite{ref38, ref24, ref15}. Recurrent models typically factor computation along the symbol positions of the input and output sequences. Aligning the positions to steps in computation time, they generate a sequence of hidden states, as a function of the previous hidden state and the input for position. This inherently sequential nature precludes parallelization within training examples, which becomes critical at longer sequence lengths, as memory constraints limit batching across examples. Recent work has achieved significant improvements in computational efficiency through factorization tricks \cite{ref21} and conditional computation \cite{ref32}, while also improving model performance in case of the latter. The fundamental constraint of sequential computation, however, remains. Attention mechanisms have become an integral part of compelling sequence modeling and transduction models in various tasks, allowing models to focus on relevant parts of the input.
+
+\begin{table}[htbp]
+\caption{Simplified Example of Attention Alignment}
+\begin{center}
+\begin{tabular}{|c|c|}
+\hline
+\textbf{Source Sentence} & \textbf{Target Sentence} \\
+\hline
+The Law will never be perfect, but its application should be just. & The Law will never be perfect, but its application should be just. \\
+\hline
+\end{tabular}
+\end{center}
+\end{table}
+
+\section*{Acknowledgment}
+
+\begin{thebibliography}{99}
+\bibitem{ref13} S. Hochreiter and J. Schmidhuber, ``Long Short-Term Memory,'' \textit{Neural Computation}, vol. 9, no. 8, pp. 1735--1780, 1997.
+\bibitem{ref35} I. Sutskever, O. Vinyals, and Q. V. Le, ``Sequence to Sequence Learning with Neural Networks,'' in \textit{Advances in Neural Information Processing Systems (NIPS 2014)}, 2014.
+\bibitem{ref38} Y. Wu et al., ``Google's Neural Machine Translation System: Bridging the Gap between Human and Machine Translation,'' \textit{arXiv preprint arXiv:1609.08144}, 2016.
+\bibitem{ref24} M. T. Luong, H. Pham, and C. D. Manning, ``Effective Approaches to Attention-based Neural Machine Translation,'' in \textit{Proceedings of the 2015 Conference on Empirical Methods in Natural Language Processing (EMNLP)}, 2015.
+\bibitem{ref15} N. Kalchbrenner and P. Blunsom, ``Recurrent Neural Network Based Language Modeling in Czech,'' in \textit{Proceedings of the 2013 Conference on Empirical Methods in Natural Language Processing (EMNLP)}, 2013.
+\bibitem{ref21} O. Kuchaiev and B. Ginsburg, ``Factorization Tricks for LSTM Networks,'' \textit{arXiv preprint arXiv:1703.10727}, 2017.
+\bibitem{ref32} N. Shazeer et al., ``Outrageously Large Neural Networks: The Sparsely-Gated Mixture-of-Experts Layer,'' in \textit{International Conference on Learning Representations (ICLR 2017)}, 2017.
+\end{thebibliography}
+
+\end{document}

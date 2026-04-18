@@ -97,9 +97,10 @@ def convert(
     """
     import shutil
     import time
+
+    from docstream.core.compiler import compile_latex
     from docstream.core.extractor_v2 import extract_structured
     from docstream.core.generator import generate_latex
-    from docstream.core.compiler import compile_latex
     from docstream.exceptions import DocstreamError
 
     start_time = time.time()
@@ -112,15 +113,14 @@ def convert(
         logger.info(f"Step 1/3: Extracting from {Path(pdf_path).name}")
         document = extract_structured(pdf_path, image_output_dir=image_dir)
         n_images = len(document.get("images", []))
-        logger.info(
-            f"Extracted {len(document['structure'])} blocks"
-            f" and {n_images} images"
-        )
+        logger.info(f"Extracted {len(document['structure'])} blocks and {n_images} images")
 
         # Step 2: Generate LaTeX
         logger.info(f"Step 2/3: Generating LaTeX ({template} template)")
         latex = generate_latex(
-            document, template, ai_provider,
+            document,
+            template,
+            ai_provider,
             image_dir=image_dir,
         )
         logger.info(f"Generated {len(latex)} chars of LaTeX")
@@ -128,7 +128,8 @@ def convert(
         # Step 3: Compile with images
         logger.info("Step 3/3: Compiling with XeLaTeX")
         tex_path, pdf_path_out = compile_latex(
-            latex, output_dir,
+            latex,
+            output_dir,
             image_dir=image_dir if n_images > 0 else None,
         )
 
@@ -179,6 +180,7 @@ def extract(pdf_path: str | Path) -> dict:
     Useful for inspecting extraction quality before converting.
     """
     from docstream.core.extractor_v2 import extract_structured
+
     return extract_structured(pdf_path)
 
 
@@ -194,4 +196,5 @@ def generate(
     Useful for inspecting AI output before compiling.
     """
     from docstream.core.generator import generate_latex
+
     return generate_latex(document, template, ai_provider)

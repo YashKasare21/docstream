@@ -1,0 +1,202 @@
+\documentclass[12pt, a4paper]{article}
+\usepackage[margin=2.5cm]{geometry}
+% Font encoding --- compatible with XeLaTeX
+\usepackage{fontspec}
+\defaultfontfeatures{Ligatures=TeX}
+\usepackage{booktabs}
+\usepackage{graphicx}
+\usepackage{amsmath}
+\usepackage{float}
+\usepackage{setspace}
+\usepackage[hidelinks]{hyperref}
+\onehalfspacing
+
+\title{ARniture: Immersive 3D Furniture Visualization for Modern Living}
+\author{Sneha M. Yadav\textsuperscript{1} \and Aryan Prakash Koli\textsuperscript{2} \and Piyush Vitthal Kurwade\textsuperscript{3} \and Shubham Jagannath Parande\textsuperscript{4}}
+\date{\today}
+
+\begin{document}
+
+\maketitle
+\footnotetext[1]{Dept. of Artificial Intelligence and Data Science, Vidyavardhini's College of Engineering and Technology, Mumbai, India. Email: sneha.yadav@vcet.edu.in}
+\footnotetext[2]{Dept. of Artificial Intelligence and Data Science, Vidyavardhini's College of Engineering and Technology, Mumbai, India. Email: aryan.236107102@vcet.edu.in}
+\footnotetext[3]{Dept. of Artificial Intelligence and Data Science, Vidyavardhini's College of Engineering and Technology, Mumbai, India. Email: piyush.236117106@vcet.edu.in}
+\footnotetext[4]{Dept. of Artificial Intelligence and Data Science, Vidyavardhini's College of Engineering and Technology, Mumbai, India. Email: shubham.236237101@vcet.edu.in}
+
+\begin{abstract}
+In this paper, a complete method of furniture visualization is presented by converting 2D images into interactive 3D objects and presenting them in augmented reality spaces. With Flutter used for cross-platform deployment, ARCore for the feature of augmented reality, and the Meshy AI API to generate 3D models, the system has a smooth, user-friendly interface to visualize furniture products in actual locations. The method combines a product list that has been sorted with Firebase for authentication and database storage, to ensure that after being generated, models are readily stored and easily accessed for later use. Such a system, apart from enabling more extensive online furniture shopping with users being able to view and interact with furniture online in advance also showcases substantial improvements in scalability, efficiency, and user interaction for AR-based retail use.
+\end{abstract}
+
+\noindent\textbf{Index Terms} --- Furniture Visualization, 2D-to-3D Conversion, Augmented Reality (AR), ARCore, Meshy AI API, Firebase Integration, Flutter Framework, 3D Model Generation, Interactive AR Experience, User-Centric Design.
+
+\section{Introduction}
+
+Augmented Reality (AR) has also been a disruptive technology allowing digital content to be linked with physical experience, allowing real-time, interactive user interaction with virtual objects\textsuperscript{1}. Its use has expanded extensively in retailing, allowing it to make it possible to achieve new customer satisfaction improvement and touchpoints\textsuperscript{2}, \textsuperscript{3}. AR is one of the most viable applications of AR to be used in furniture retailing because customers often find it difficult to visualize how a product will be interpreted and redefined in their own domains. This paper proposes an AR-based Furniture Visualization system that transforms 2D images of furniture into interactive 3D models, where users can put and move these models virtually in real-world environments using mobile phones\textsuperscript{4}, \textsuperscript{5}. We use a mixture of contemporary software platforms and tools to enable this system. Flutter framework is utilized in developing a dynamic and interactive cross-platform mobile app\textsuperscript{6}, \textsuperscript{7}, \textsuperscript{8}, and Google ARCore SDK enables accurate tracking and rendering of 3D objects into the real world\textsuperscript{9}, \textsuperscript{10}. The center of attention in our solution is using Meshy AI API, which directly generates the 2D images of furniture to be automatically translated to 3D models without 3D modeling manually\textsuperscript{11}. Firebase also handles real-time authentication, secure storage of users' data, and loading of pre-trained models\textsuperscript{12}, \textsuperscript{13}, \textsuperscript{14}. Conventional e-commerce websites heavily depend on static images and descriptions, leading to ambiguity and dissatisfaction due to perceived and actual appearance look incongruence\textsuperscript{15}, \textsuperscript{16}. Our system prevents this problem because it allows users to interactively browse, edit, and judge virtual furniture in their real environment, employing mobile AR technology. This interactive visualization significantly enhances decision-making and improves user confidence in web-based shopping\textsuperscript{17}, \textsuperscript{18}. Unlike past work that only focused on one small part of AR or used separate visualization methods\textsuperscript{19}, our system provides a full solution. It combines deep learning for making 3D models, AR-based viewing, support for different platforms, and a secure back-end, all in one complete framework. This gives both customers and furniture sellers a shopping experience that feels almost real, right from a phone. This paper explains how we built, tested, and designed the system, and how it could change the way people shop online. By solving key problems like making models look real, fast rendering, smooth user interaction, and safe data storage, our system takes AR shopping to the next level. The methods we use also open new doors for future work in interior design, house visualization, and real estate staging\textsuperscript{20}, \textsuperscript{21}, \textsuperscript{22}.
+
+\section{Related Work}
+
+Augmented Reality (AR) has changed the way people shop because it lets them see how a product would look in their own room\textsuperscript{23}. Popular apps like IKEA Place and Amazon AR View let users place virtual furniture inside their real spaces\textsuperscript{24}. But these apps mostly use a fixed set of 3D models already made by the companies, which means the options are limited. Customers can only try out products that sellers have taken the time to turn into 3D, while most furniture items are still not available in AR\textsuperscript{25}.
+
+Improvements in real-time rendering and deep learning have opened the door for more universal AR systems. Dynamic 3D model generation approaches that transform 2D images into interactive 3D models have been investigated by researchers for on-demand creation of sophisticated models\textsuperscript{26}. Our approach benefits from this with the addition of a mechanism for creating 3D models based on deep learning with ARCore for real-time rendering\textsuperscript{27}. In addition to avoiding the inefficiency of precomputed databases of 3D models, this approach \textbf{provides AR support for nearly any furniture item for which a 2D image exists}, with improved responsiveness and user-tailored experience by way of support for end-user-generated content\textsuperscript{28}. Cross-platform tools like Flutter have made AR apps easier to use and smoother across different devices\textsuperscript{29}. In our work, we build on this by using a deep learning method to create 3D models and then show them in real-time using ARCore\textsuperscript{30}. This helps us avoid the problem of only having fixed 3D models and instead lets users try out more types of furniture in AR, giving them a wider and more personal experience\textsuperscript{31}. We also use Firebase since it works well for signing in users and for storing and getting back models in a way that can be scalable as needed\textsuperscript{32}, \textsuperscript{33}. This setup is useful for making custom catalogs for users and for smooth interaction between them and the AR system\textsuperscript{34}. In short, our main contribution is bringing together real-time 3D model creation, AR features, cross-platform support, and a secure backend. This makes AR-based shopping apps more flexible and practical\textsuperscript{35}.
+
+\section{Methodology}
+
+The system we made is an Augmented Reality (AR) app built with Flutter. In this app, users can take normal 2D pictures of furniture and change them into 3D models. After that, they can use ARCore\textsuperscript{36} to place these 3D models in their real surroundings and see how the furniture would actually look in real life. The system works step by step in a proper pipeline which includes collecting the data, making the 3D model, showing it in AR, and finally letting the user interact with it. This part explains the main parts of the system and the steps we followed to make it work.
+
+\subsection{System Architecture}
+
+ARniture provides a scalable, modular, and easy-to-use user experience based architecture which is best suited to be leveraged for AR-based visualization of furniture. It includes end-of-line tools and APIs to facilitate 2D to 3D conversion, AR rendering, secure processing of data, and interactive UI controls. Four system-level modules are at the top level.
+\begin{figure}[htbp]
+\centering
+\includegraphics[width=0.8\linewidth]{fig_p3_0}
+\caption{Overall System Architecture of ARniture}
+\label{fig:system_architecture}
+\end{figure}
+1) User Interface (UI) \& Product Catalog: It is constructed on the Flutter SDK, which was used because it has the ability to provide native-like speed on Android and iOS with shared codebase\textsuperscript{38}, \textsuperscript{39}. The user interface features the list of products, divided by furniture type like sofas, chairs, tables, and cupboards\textsuperscript{40}. It features each of the product card with image, name, and quick view button. Tap-based, the application displays the detailed view with the image of the product, description, price, and a "View in 3D" button to trigger generation or visualization of the model. The interface is responsive to intuitive interface, high usability and user satisfaction\textsuperscript{41}. 2) 2D to 3D Model Creation: ARniture uses Meshy AI API for 2D image-to-3D model creation of furniture\textsuperscript{42}. Catalog images or user-uploaded images can be chosen. The image is then submitted to Meshy's cloud-based AI pipeline that uses deep learning techniques in an effort to reconstruct a high-fidelity and textured 3D geometry\textsuperscript{43}. It is 2--3 minute per model, uses UV mapping and mesh optimization, and is cloud-cached and locally cached to be reused to avoid redundant API calls and reduce latency\textsuperscript{44}. The module scales and personalizes apps greatly and includes user-uploaded media support. We chose the Meshy AI API after trying out many different methods for turning 2D pictures into 3D models. At first, we tested some pre-trained transformer models from places like Hugging Face. But these models could not give us the right shapes, proper scaling, and realistic textures that are needed to make furniture models look good in AR. The 3D outputs from those methods didn't look real enough to use in real-world visualization. It would have taken a lot of efforts and time to improve them, and still there was no surety of good results. Meshy AI, on the other hand, worked much better and gave us high-quality 3D models from 2D images, which matched exactly what we wanted for realistic and immersive furniture viewing. By using this service, we didn't have to spend time building our own very complex 3D generation system. Instead, we could focus more on making the AR part of the app smooth and user-friendly. This tool also made the app more flexible, as users could even upload their own pictures to create 3D models, making the system more personal and scalable.
+\begin{figure}[htbp]
+\centering
+\includegraphics[width=0.45\linewidth]{fig_p4_0}
+\caption{User Interface for Product Catalog}
+\label{fig:ui_catalog}
+\end{figure}
+\begin{figure}[htbp]
+\centering
+\includegraphics[width=0.45\linewidth]{fig_p4_1}
+\caption{2D Image Input for 3D Model Generation}
+\label{fig:2d_input}
+\end{figure}
+\begin{figure}[htbp]
+\centering
+\includegraphics[width=0.45\linewidth]{fig_p4_2}
+\caption{Generated 3D Model Preview}
+\label{fig:3d_preview}
+\end{figure}
+3) Augmented Reality Visualization: AR feature is enabled through Google's ARCore SDK\textsuperscript{45}. Once the 3D model is created or chosen from the repository, it is visualized in the user space through the camera and sensors of the phone. The AR module allows real-time surface detection, scale, translation, and rotation of an object so that the users are able to play with the model as if physically present around them\textsuperscript{46}. ARCore application provides quality vision and space precision in tracking, which equates to an interactive and natural shopping experience\textsuperscript{47}. The module reduces one of the largest disadvantages of e-shopping in that it allows customers to select aesthetics and space suitability prior to making a purchasing decision\textsuperscript{48}, \textsuperscript{49}.
+\begin{figure}[htbp]
+\centering
+\includegraphics[width=0.45\linewidth]{fig_p5_0}
+\caption{AR Visualization of Furniture in a Real Room}
+\label{fig:ar_view1}
+\end{figure}
+\begin{figure}[htbp]
+\centering
+\includegraphics[width=0.45\linewidth]{fig_p5_1}
+\caption{Interactive AR Object Manipulation}
+\label{fig:ar_manipulation}
+\end{figure}
+\begin{figure}[htbp]
+\centering
+\includegraphics[width=0.45\linewidth]{fig_p5_2}
+\caption{AR Furniture Placement and Scaling}
+\label{fig:ar_view2}
+\end{figure}
+4) User Authentication \& Data Storage: For secure, user-friendly interaction, ARniture employs Firebase Authentication to manage users' accounts, sign-up login, and session management\textsuperscript{50}, \textsuperscript{51}. On authentication, users are provided with a customized dashboard where their earlier created 3D models are saved. Firebase Firestore is employed to cache image URLs, timestamps, and associated product data as metadata\textsuperscript{52}. Such backend optimization is optimal for
+
+\section{Experimental Results and Discussion}
+The ARniture app was tested on different Android phones (like "Redmi Note 12, Samsung M30") to check how well it works, how smooth the user experience is, and how good the process of turning 2D pictures into 3D models is. In our testing, we looked at numbers to measure how fast and responsive the system is, and we also checked the quality of the AR view and how satisfied the users felt while using it.
+
+\subsection{A. Performance Metrics}
+To quantify the system's efficiency, we measured key performance indicators across different modules:
+\begin{itemize}
+  \item \textbf{2D-to-3D Model Generation Latency:} The Meshy AI API integration demonstrated an average model generation time of 2 minutes and 30 seconds, with a range of 2 to 4 minutes depending on image complexity and server load. This latency is primarily due to the complex deep learning inference involved in reconstructing 3D geometry and texturing from a 2D input. Subsequent retrievals of previously generated models from Firebase Cloud Storage exhibited an average load time of less than 2 seconds, significantly enhancing user experience for returning items.
+  \item \textbf{AR Rendering Frame Rate:} On tested devices, the AR functionality viewing screen consistently maintained an average frame rate of 50-55 Frames Per Second (FPS) during typical user interaction (scaling, rotation, translation). This high FPS ensures a smooth and immersive AR experience without noticeable lag or stutter, which is critical for realistic spatial visualization.
+  \item \textbf{User Interface Responsiveness:} Login and product catalog loading times were consistently below 2 seconds, facilitated by Firebase's efficient authentication and data retrieval mechanisms and Flutter's optimized UI rendering.
+\end{itemize}
+
+\subsection{B. Model Fidelity and AR Accuracy}
+The visual quality and spatial accuracy of the 3D models within the AR environment were crucial evaluation points.
+\begin{itemize}
+  \item \textbf{3D Model Fidelity (Meshy AI):} The models generated by the Meshy AI API exhibited high visual fidelity, accurately capturing the overall form, dimensions, and texture of the original 2D furniture images (see Figure \ref{fig:5}). While minor simplification of intricate details was occasionally observed, the models were consistently suitable for realistic placement and evaluation in a user's environment. This confirms Meshy AI's effectiveness in transforming diverse 2D inputs into usable 3D assets for AR.
+  \item \textbf{AR Tracking and Placement Accuracy (ARCore):} ARCore successfully provided robust plane detection and stable tracking, allowing users to virtually place furniture with high spatial accuracy. Models remained anchored to detected surfaces without significant drift, even when the user moved around the object. The scaling, rotation, and translation functionalities were intuitive and responsive, allowing users to precisely position furniture items and assess their fit within real-world dimensions. The system also demonstrated adaptability to varying indoor lighting conditions, rendering models realistically.
+\end{itemize}
+
+\subsection{C. User Experience and System Validation}
+Informal user feedback from a group of 5 students was overwhelmingly positive, highlighting ARniture's practical utility.
+\begin{itemize}
+  \item Users found the ability to upload their own 2D images and instantly view them in AR to be a game-changer compared to traditional static images or limited pre-set AR catalogs.
+  \item Users highlighted that the AR functionality provided an unprecedented ability to preview furniture in their real environment, which was invaluable for assessing how an item would look, its true scale, and its compatibility with their existing room layout and design.
+  \item The intuitive Flutter-based interface ensured ease of navigation and interaction, contributing to a seamless overall experience. The initial user interaction begins with the login process, as shown in the screenshot of the login system screen (Figure \ref{fig:2}). This module, built using Firebase Authentication, provides a secure and streamlined sign-in experience. Users can quickly access the application, ensuring minimal entry barriers and secure user data management.
+\end{itemize}
+
+\begin{figure}[htbp]
+  \centering
+  \includegraphics[width=0.8\linewidth]{fig_p2_0}
+  \caption{Login system screen.}
+  \label{fig:2}
+\end{figure}
+
+Once authenticated, users are presented with a sample products screen (Figure \ref{fig:3}) that displays a catalog of furniture items, organized by categories. This screen is critical for guiding the user experience by enabling easy navigation through available options. The interface is designed with clarity in mind, ensuring that users can effortlessly browse through different products and select items of interest.
+
+\begin{figure}[htbp]
+  \centering
+  \includegraphics[width=0.8\linewidth]{fig_p2_1}
+  \caption{Sample products screen.}
+  \label{fig:3}
+\end{figure}
+
+When a user selects a product or opts to upload a new image, the system transitions to the 2D-to-3D model generation screen (Figure \ref{fig:4}). Here, the application sends the image to the Meshy AI API, which processes it to generate a 3D model. Although this conversion process takes approximately 2--3 minutes, subsequent accesses to the same model are expedited by caching in Firebase Cloud Storage. This functionality is crucial for reducing redundant processing and enhancing the overall efficiency of the system.
+
+\begin{figure}[htbp]
+  \centering
+  \includegraphics[width=0.8\linewidth]{fig_p2_2}
+  \caption{2D-to-3D model generation screen.}
+  \label{fig:4}
+\end{figure}
+
+Following model generation, the application presents the 3D model rendering screen (Figure \ref{fig:5}). This module demonstrates how the system successfully converts a 2D image into a visually detailed 3D model, ready for interaction.
+
+\begin{figure}[htbp]
+  \centering
+  \includegraphics[width=0.8\linewidth]{fig_p2_3}
+  \caption{3D model rendering screen.}
+  \label{fig:5}
+\end{figure}
+
+\begin{thebibliography}{99}
+\bibitem{ref1} Firebase usage enables real-time sync, scalability, and system response improved.
+\bibitem{ref2} Meshy AI API: 2D image to 3D model conversion.
+\bibitem{ref3} ARCore SDK: AR rendering and real-world interaction management.
+\bibitem{ref4} Flutter: Cross-platform implementation of the app.
+\bibitem{ref5} Firebase: Authentication and database management.
+\bibitem{ref6} ARCore Installation Issues: Initial problems with installing ARCore modules and rendering AR without hiccups.
+\bibitem{ref7} CPU Usage on Emulator: AR performance duration on PC emulator was poor; usage of actual Android devices showed better performance.
+\bibitem{ref8} 3D Model Storage Optimization: Firebase had been set up to cache pre-rendered models in order to prevent unnecessary API calls and enhance the user experience.
+\end{thebibliography}
+
+\end{document}
+
+\section{System Architecture}
+This section detailed the modular architecture of ARniture, including its frontend (Flutter), augmented reality component (ARCore), 2D-to-3D model conversion (Meshy AI API), and backend services (Firebase).
+
+\section{Implementation Details}
+This section described the practical aspects of developing ARniture, covering the development environment, user authentication, 2D-to-3D conversion workflow, AR model interaction, and user interface design.
+
+\section{Future Work}
+We want ARniture to move quickly for the users. Currently, it's too slow to turn a flat image into a 3D object. That doesn't excite people but also delays them. In future versions, we will see how to create 3D objects as quickly as possible so that the users will have immediate feedback. Our second goal is to introduce more objects through which people will be able to decorate their homes. So far, people have been able to put only furniture items within their bedrooms. We will introduce photographs on the wall, showpieces, and other home decoration pieces. We will also introduce some objects that simulate the characteristics of light in various rooms and provide users with the option of how materials appear. We would like more individuals to be able to utilize our app. Currently, ARniture will only be available on AR-compatible Android phones. We would like to make it so that we can utilize other devices in the future. This would include iPhones and computers. This way, individuals who have these other types of devices can use our program and design their space. Finally, we would also like to know from our users how ARniture can be further fine-tuned. We will have feedback channels where the users will be able to give feedback and understand how they are utilizing various features. We will track this information so that we understand what is working and what requires fine-tuning. We can then fine-tune accordingly so that we are actually improving our users' status.
+
+\section{Conclusion}
+This project presented ARniture, an augmented reality furniture online shopping experience enhancer. It has a Flutter frontend, rendering with ARCore, 2D image to 3D model conversion using Meshy AI API, and data storage with Firebase securely. ARniture allows users to easily and interactively visualize how the furniture can actually fit in their real space. The system was tested to verify that it closes the gap between viewing products on the internet and imagining them in actual situations and thus generating consumers' confidence in online shopping for furniture. Despite the fact that some of such issues, such as waiting for scanning 3D models, continue to exist, the system generally enhances the shopping experience. The app will also be optimized in the future further to transform models in less time and for more cross-platform apps, making ARniture as a scalable retail solution.
+
+\begin{thebibliography}{99}
+\bibitem{ref1} M. Azuma, "A Survey of Augmented Reality," Presence: Teleoperators and Virtual Environments, vol. 6, no. 4, pp. 355--385, 1997.
+\bibitem{ref2} Google, "ARCore Overview," Google Developers, 2021. [Online]. Available: \url{https://developers.google.com/ar}
+\bibitem{ref3} Google, "Flutter: Beautiful Native Apps in Record Time," Google Developers, 2021. [Online]. Available: \url{https://flutter.dev}
+\bibitem{ref4} Firebase, "Firebase Documentation," Firebase, 2021. [Online]. Available: \url{https://firebase.google.com/docs}
+\bibitem{ref5} Meshy AI, "Meshy AI API Documentation," Meshy AI, 2022. [Online]. Available: \url{https://meshy.ai/docs}
+\bibitem{ref6} N. G. Tien, "Design and Development of an Augmented Reality Application for Furniture Retail," Journal of Emerging Technologies in Web Intelligence, vol. 12, no. 3, pp. 56--64, 2020.
+\bibitem{ref7} S. Lee, "Mobile Augmented Reality for Retail," in Proc. IEEE Int. Symp. Mixed and Augmented Reality, 2019, pp. 50--57.
+\bibitem{ref8} K. Kato, "User Experience Evaluation in AR Shopping Applications," Journal of Digital Retail, vol. 5, no. 2, pp. 89--96, 2018.
+\bibitem{ref9} S. Smith, "Building Cross-Platform Apps with Flutter," Software: Practice and Experience, vol. 50, no. 3, pp. 250--255, 2020.
+\bibitem{ref10} J. Brown, "Firebase: Real-Time Database for Mobile Applications," in Proc. Int. Conf. Cloud Computing, 2019, pp. 200--205.
+\bibitem{ref11} A. Gupta, "Augmented Reality in E-Commerce: A Comparative Study," IEEE Trans. on Engineering Management, vol. 67, no. 2, pp. 215--223, 2020.
+\bibitem{ref12} J. Martin, "Enhancing Furniture Visualization through Augmented Reality," in Proc. Global Conf. Consumer Electronics, 2021, pp. 300--305.
+\bibitem{ref13} D. Lee, "Integrating AR with E-Commerce Platforms," Journal of Emerging Technologies, vol. 9, no. 1, pp. 130--137, 2021.
+\bibitem{ref14} H. Park, "Mobile AR for Interior Design Applications," in Proc. Int. Conf. Mobile Services, 2019, pp. 78--83.
+\bibitem{ref15} P. Hernandez, "AR and VR in Retail: Trends and Challenges," Journal of Retail Technology, vol. 3, no. 1, pp. 25--34, 2021.
+\bibitem{ref16} T. Wong, "Augmented Reality: A New Dimension in Retail," IEEE MultiMedia, vol. 28, no. 2, pp. 45--52, 2021.
+\bibitem{ref17} C. Davis, "Leveraging Flutter for Rapid Mobile App Development," IEEE Software, vol. 38, no. 4, pp. 50--55, 2021.
+\bibitem{ref18} M. Patel, "Secure Mobile Applications using Firebase Authentication," in Proc. Int. Conf. Cybersecurity, 2020, pp. 140--145.
+\bibitem{ref19} P. Kumar, "Modern Mobile Backend as a Service: A Case Study of Firebase," IEEE Cloud Computing, vol. 7, no. 2, pp. 20--27, 2020.
+\bibitem{ref20} R. Singh, "Enhancing Mobile AR Applications with Cloud-Based Services," International Journal of Mobile Computing, vol. 10, no. 2, pp. 78--85, 2021.
+\end{thebibliography}
+\end{document}

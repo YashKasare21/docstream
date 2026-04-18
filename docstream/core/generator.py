@@ -54,17 +54,17 @@ def generate_latex(
     """
     try:
         from dotenv import load_dotenv
+
         load_dotenv()
     except ImportError:
         pass  # dotenv not installed — keys must be in env already
 
-    from docstream.exceptions import TemplateError, StructuringError
     from docstream.core.ai_provider import AIProviderChain
+    from docstream.exceptions import TemplateError
 
     if template not in VALID_TEMPLATES:
         raise TemplateError(
-            f"Unknown template: '{template}'. "
-            f"Valid: {', '.join(sorted(VALID_TEMPLATES))}"
+            f"Unknown template: '{template}'. Valid: {', '.join(sorted(VALID_TEMPLATES))}"
         )
 
     skeleton = _load_skeleton(template)
@@ -79,17 +79,12 @@ def generate_latex(
     # replace whatever the AI generates with the real text.
     real_bib = _extract_bibliography(document)
     if real_bib:
-        ref_count = sum(
-            1 for b in document.get('structure', [])
-            if b.get('type') == 'reference'
-        )
-        logger.info(
-            f"Pre-extracted {ref_count} reference blocks for direct injection"
-        )
+        ref_count = sum(1 for b in document.get("structure", []) if b.get("type") == "reference")
+        logger.info(f"Pre-extracted {ref_count} reference blocks for direct injection")
 
     # Build full content string once
     content_parts = _build_content_parts(document)
-    full_content = '\n\n'.join(content_parts)
+    full_content = "\n\n".join(content_parts)
     full_content = _preprocess_content(full_content)
 
     logger.info(
@@ -100,14 +95,22 @@ def generate_latex(
 
     if len(full_content) <= 15000:
         latex = _generate_single(
-            full_content, skeleton, instructions,
-            template, system_prompt, ai_provider,
+            full_content,
+            skeleton,
+            instructions,
+            template,
+            system_prompt,
+            ai_provider,
         )
     else:
         logger.info("Document is long — using split generation strategy")
         latex = _generate_split(
-            full_content, skeleton, instructions,
-            template, system_prompt, ai_provider,
+            full_content,
+            skeleton,
+            instructions,
+            template,
+            system_prompt,
+            ai_provider,
         )
         # _generate_single calls _postprocess_latex internally;
         # _generate_split does not — apply it here so Fix 1 (fbox
@@ -122,15 +125,15 @@ def generate_latex(
     images = document.get("images", [])
     if images and image_dir:
         pre_len = len(latex)
-        has_end = '\\end{document}' in latex
-        bib_pos = latex.find('\\begin{thebibliography}')
+        has_end = "\\end{document}" in latex
+        bib_pos = latex.find("\\begin{thebibliography}")
         logger.info(
             f"Before figure insertion: latex={pre_len} chars, "
             f"has_end_doc={has_end}, bib_pos={bib_pos}"
         )
         latex = _insert_figures(latex, images, template)
-        post_figs = len(re.findall(r'\\includegraphics', latex))
-        post_fbox = len(re.findall(r'\\fbox', latex))
+        post_figs = len(re.findall(r"\\includegraphics", latex))
+        post_fbox = len(re.findall(r"\\fbox", latex))
         logger.info(
             f"After figure insertion: latex={len(latex)} chars, "
             f"includegraphics={post_figs}, fbox={post_fbox}"
@@ -143,9 +146,7 @@ def _load_skeleton(template: str) -> str:
     """Load the LaTeX skeleton file for a template."""
     path = TEMPLATES_DIR / f"{template}.tex"
     if not path.exists():
-        raise FileNotFoundError(
-            f"Template skeleton not found: {path}"
-        )
+        raise FileNotFoundError(f"Template skeleton not found: {path}")
     return path.read_text(encoding="utf-8")
 
 
@@ -233,8 +234,14 @@ WRONG: \\section{INTRODUCTION}"""
 
 
 _AFFILIATION_KEYWORDS = (
-    'university', 'college', 'institute', 'department',
-    'dept', 'school', 'laboratory', 'lab',
+    "university",
+    "college",
+    "institute",
+    "department",
+    "dept",
+    "school",
+    "laboratory",
+    "lab",
 )
 
 
@@ -265,10 +272,8 @@ def _build_content_parts(document: dict[str, Any]) -> list[str]:
             # Tag affiliation/email blocks in the first 10 paragraphs
             # so the AI knows to put them in \thanks{}
             if i < 10:
-                has_email = '@' in text
-                is_affil = any(
-                    kw in text.lower() for kw in _AFFILIATION_KEYWORDS
-                )
+                has_email = "@" in text
+                is_affil = any(kw in text.lower() for kw in _AFFILIATION_KEYWORDS)
                 if has_email or is_affil:
                     content_parts.append(f"[AFFILIATION] {text}")
                     continue
@@ -348,9 +353,7 @@ def _build_prompt(
             + structured_content[-last_part:]
         )
 
-    return _build_prompt_from_content(
-        structured_content, skeleton, instructions, template
-    )
+    return _build_prompt_from_content(structured_content, skeleton, instructions, template)
 
 
 def _generate_single(
@@ -364,9 +367,7 @@ def _generate_single(
     """Generate LaTeX in a single AI call."""
     from docstream.exceptions import StructuringError
 
-    prompt = _build_prompt_from_content(
-        full_content, skeleton, instructions, template
-    )
+    prompt = _build_prompt_from_content(full_content, skeleton, instructions, template)
 
     raw = ""
     for attempt in range(2):
@@ -384,16 +385,11 @@ def _generate_single(
         if attempt == 0:
             logger.warning("LaTeX truncated, retrying with shorter content")
             short_content = full_content[:8000]
-            prompt = _build_prompt_from_content(
-                short_content, skeleton, instructions, template
-            )
+            prompt = _build_prompt_from_content(short_content, skeleton, instructions, template)
 
     latex = _extract_latex(raw)
     if not latex or "\\documentclass" not in latex:
-        raise StructuringError(
-            "AI returned invalid LaTeX. "
-            f"Response starts with: {raw[:200]}"
-        )
+        raise StructuringError(f"AI returned invalid LaTeX. Response starts with: {raw[:200]}")
     return latex
 
 
@@ -411,34 +407,39 @@ def _generate_split(
     Chunks are capped at ~8 000 chars to stay within Groq's
     free-tier token limit (~6 000 tokens per chunk).
     """
-    CHUNK_SIZE = 8000
+    chunk_size = 8000
 
-    n_parts = 3 if len(full_content) > CHUNK_SIZE * 2 else 2
+    n_parts = 3 if len(full_content) > chunk_size * 2 else 2
     chunks = _split_at_headings(full_content, n_parts)
 
-    logger.info(
-        f"Split into {len(chunks)} chunks: "
-        f"{[len(c) for c in chunks]} chars"
-    )
+    logger.info(f"Split into {len(chunks)} chunks: {[len(c) for c in chunks]} chars")
 
     part1_latex = _generate_part1(
-        chunks[0], skeleton, instructions,
-        template, system_prompt, ai_provider,
+        chunks[0],
+        skeleton,
+        instructions,
+        template,
+        system_prompt,
+        ai_provider,
     )
 
     # Extract last section from Part 1 for context handoff
-    sections_in_part1 = re.findall(r'\\section\{([^}]+)\}', part1_latex)
+    sections_in_part1 = re.findall(r"\\section\{([^}]+)\}", part1_latex)
     last_section = sections_in_part1[-1] if sections_in_part1 else "Introduction"
 
     continuation_parts: list[str] = []
     for i, chunk in enumerate(chunks[1:], start=2):
         try:
             part = _generate_continuation(
-                chunk, i, len(chunks), system_prompt, ai_provider,
+                chunk,
+                i,
+                len(chunks),
+                system_prompt,
+                ai_provider,
                 last_section_written=last_section,
             )
             # Update last section for next part
-            new_sections = re.findall(r'\\section\{([^}]+)\}', part)
+            new_sections = re.findall(r"\\section\{([^}]+)\}", part)
             if new_sections:
                 last_section = new_sections[-1]
             continuation_parts.append(part)
@@ -469,30 +470,25 @@ def _split_at_headings(content: str, n_parts: int) -> list[str]:
         search_area = remaining[search_start:search_end]
 
         # Priority 1: split at a heading
-        heading_match = re.search(r'\n#{1,3} ', search_area)
+        heading_match = re.search(r"\n#{1,3} ", search_area)
         if heading_match:
             split_pos = search_start + heading_match.start()
         else:
             # Priority 2a: split at sentence-ending paragraph break
             # (avoids cutting mid-sentence when paragraph break is in
             # the middle of a sentence due to extractor fragmentation)
-            sent_para = re.search(
-                r'[.!?][)\]"]?\s*\n\n', remaining[split_target:]
-            )
+            sent_para = re.search(r'[.!?][)\]"]?\s*\n\n', remaining[split_target:])
             if sent_para:
                 split_pos = split_target + sent_para.end()
             else:
                 # Priority 2b: any paragraph break
-                para_match = re.search(r'\n\n', remaining[split_target:])
+                para_match = re.search(r"\n\n", remaining[split_target:])
                 if para_match:
                     split_pos = split_target + para_match.end()
                 else:
                     # Priority 3: split at next word boundary
                     split_pos = split_target
-                    while (
-                        split_pos < len(remaining)
-                        and remaining[split_pos] not in (' ', '\n')
-                    ):
+                    while split_pos < len(remaining) and remaining[split_pos] not in (" ", "\n"):
                         split_pos += 1
 
         parts.append(remaining[:split_pos].strip())
@@ -555,8 +551,8 @@ def _generate_continuation(
     is_last = part_num == total_parts
     ending_rule = (
         "End with \\\\begin{thebibliography} and \\\\end{document}"
-        if is_last else
-        "End with % CONTINUES_NEXT_PART"
+        if is_last
+        else "End with % CONTINUES_NEXT_PART"
     )
 
     context_hint = ""
@@ -635,8 +631,8 @@ def _insert_figures(
     # Remove fbox placeholders left by _postprocess_latex — we are
     # about to insert the real figures, so these boxes are redundant.
     latex = re.sub(
-        r'\\fbox\{\\parbox\{[^}]+\}\{[^\}]*\[Figure:[^\]]*\][^\}]*\}\}',
-        '',
+        r"\\fbox\{\\parbox\{[^}]+\}\{[^\}]*\[Figure:[^\]]*\][^\}]*\}\}",
+        "",
         latex,
     )
 
@@ -647,9 +643,9 @@ def _insert_figures(
     # 4. end of string
     insert_before = len(latex)
     for marker in (
-        '\\begin{thebibliography}',
-        '\\bibliography{',
-        '\\end{document}',
+        "\\begin{thebibliography}",
+        "\\bibliography{",
+        "\\end{document}",
     ):
         pos = latex.find(marker)
         if pos != -1 and pos < insert_before:
@@ -659,13 +655,9 @@ def _insert_figures(
     tail = latex[insert_before:]  # starts at bibliography or \end{document}
 
     def make_figure(img: dict, fig_num: int) -> str:
-        stem = img['filename'].rsplit('.', 1)[0]
+        stem = img["filename"].rsplit(".", 1)[0]
         width = "0.9\\columnwidth" if template == "ieee" else "0.75\\linewidth"
-        env = (
-            "figure*"
-            if template == "ieee" and img['width'] > img['height']
-            else "figure"
-        )
+        env = "figure*" if template == "ieee" and img["width"] > img["height"] else "figure"
         return (
             f"\n\\begin{{{env}}}[H]\n"
             f"\\centering\n"
@@ -676,8 +668,8 @@ def _insert_figures(
         )
 
     # Broad pattern covers: Fig 1, Figure 1, Fig. 1, Fig.~1, Fig.\ 1
-    fig_pattern = re.compile(r'(?i)fig(?:ure)?\.?\s*[~\\]?\s*(\d+)')
-    ref_pattern = re.compile(r'(?i)\\ref\{fig:(\d+)\}')
+    fig_pattern = re.compile(r"(?i)fig(?:ure)?\.?\s*[~\\]?\s*(\d+)")
+    ref_pattern = re.compile(r"(?i)\\ref\{fig:(\d+)\}")
 
     mentions: dict[int, int] = {}
     for pat in (fig_pattern, ref_pattern):
@@ -694,10 +686,7 @@ def _insert_figures(
     )
 
     if not mentions:
-        logger.info(
-            "No figure mentions found — inserting figures "
-            "section before bibliography"
-        )
+        logger.info("No figure mentions found — inserting figures section before bibliography")
         figures_section = "\n\\clearpage\n" + "".join(
             make_figure(img, i) for i, img in enumerate(images, 1)
         )
@@ -710,34 +699,29 @@ def _insert_figures(
         figure_env = make_figure(images[fig_num - 1], fig_num)
         pos = mentions[fig_num]
         para_end = re.search(
-            r'\n\n|\n\\(?:sub)*section|\n\\clearpage',
+            r"\n\n|\n\\(?:sub)*section|\n\\clearpage",
             result[pos:],
         )
-        insert_pos = (
-            pos + para_end.start() + 1
-            if para_end else min(pos + 300, len(result))
-        )
+        insert_pos = pos + para_end.start() + 1 if para_end else min(pos + 300, len(result))
         result = result[:insert_pos] + figure_env + result[insert_pos:]
         inserted.add(fig_num)
 
     # Remaining figures (no mention) go into body, before tail
     remaining = "".join(
-        make_figure(images[i - 1], i)
-        for i in range(1, len(images) + 1)
-        if i not in inserted
+        make_figure(images[i - 1], i) for i in range(1, len(images) + 1) if i not in inserted
     )
     return result + remaining + tail
 
 
 def _merge_all_parts(part1: str, continuation_parts: list[str]) -> str:
     """Merge all generated parts into one complete LaTeX document."""
-    part1 = re.sub(r'%\s*CONTINUES_NEXT_PART.*', '', part1).rstrip()
+    part1 = re.sub(r"%\s*CONTINUES_NEXT_PART.*", "", part1).rstrip()
     # Strip any bibliography Part 1 generated — it belongs only in the
     # final part. AI sometimes emits a placeholder \begin{thebibliography}
     # even though the prompt says not to include \end{document}.
     part1 = re.sub(
-        r'\\begin\{thebibliography\}.*?\\end\{thebibliography\}',
-        '',
+        r"\\begin\{thebibliography\}.*?\\end\{thebibliography\}",
+        "",
         part1,
         flags=re.DOTALL,
     )
@@ -745,17 +729,15 @@ def _merge_all_parts(part1: str, continuation_parts: list[str]) -> str:
     cleaned: list[str] = []
     for i, part in enumerate(continuation_parts):
         if part:
-            part = re.sub(
-                r'%\s*CONTINUES_NEXT_PART.*', '', part
-            ).rstrip()
+            part = re.sub(r"%\s*CONTINUES_NEXT_PART.*", "", part).rstrip()
             # Strip any stray bibliography from non-final parts —
             # Groq sometimes ignores the "no bibliography" instruction.
             # The final part is responsible for the real bibliography.
-            is_final = (i == len(continuation_parts) - 1)
+            is_final = i == len(continuation_parts) - 1
             if not is_final:
                 part = re.sub(
-                    r'\\begin\{thebibliography\}.*?\\end\{thebibliography\}',
-                    '',
+                    r"\\begin\{thebibliography\}.*?\\end\{thebibliography\}",
+                    "",
                     part,
                     flags=re.DOTALL,
                 )
@@ -763,26 +745,22 @@ def _merge_all_parts(part1: str, continuation_parts: list[str]) -> str:
 
     # Track section AND subsection titles seen in Part 1 for deduplication
     seen_sections: set[str] = {
-        s.lower().strip()
-        for s in re.findall(r'\\section\{([^}]+)\}', part1)
+        s.lower().strip() for s in re.findall(r"\\section\{([^}]+)\}", part1)
     }
     seen_subsections: set[str] = {
-        s.lower().strip()
-        for s in re.findall(r'\\subsection\{([^}]+)\}', part1)
+        s.lower().strip() for s in re.findall(r"\\subsection\{([^}]+)\}", part1)
     }
 
     # Remove duplicate sections/subsections from continuation parts
     deduped: list[str] = []
     for part in cleaned:
-        lines = part.split('\n')
+        lines = part.split("\n")
         filtered: list[str] = []
         skip = False
 
         for line in lines:
-            section_match = re.match(r'\\section\{([^}]+)\}', line.strip())
-            subsection_match = re.match(
-                r'\\subsection\{([^}]+)\}', line.strip()
-            )
+            section_match = re.match(r"\\section\{([^}]+)\}", line.strip())
+            subsection_match = re.match(r"\\subsection\{([^}]+)\}", line.strip())
             if section_match:
                 title = section_match.group(1).lower().strip()
                 if title in seen_sections:
@@ -799,49 +777,49 @@ def _merge_all_parts(part1: str, continuation_parts: list[str]) -> str:
                 else:
                     seen_subsections.add(title)
                     skip = False
-            elif skip and re.match(r'\\(?:sub)*section\{', line.strip()):
+            elif skip and re.match(r"\\(?:sub)*section\{", line.strip()):
                 # Any new (sub)section ends the skip region
                 skip = False
 
             if not skip:
                 filtered.append(line)
 
-        deduped.append('\n'.join(filtered))
+        deduped.append("\n".join(filtered))
 
-    merged = '\n\n'.join(p for p in [part1] + deduped if p.strip())
+    merged = "\n\n".join(p for p in [part1] + deduped if p.strip())
 
-    if '\\end{document}' not in merged:
-        merged = merged.rstrip() + '\n\\end{document}'
+    if "\\end{document}" not in merged:
+        merged = merged.rstrip() + "\n\\end{document}"
 
     return merged
 
 
 def _extract_latex_partial(response: str) -> str:
     """Extract partial LaTeX (no \\end{document} expected)."""
-    response = re.sub(r'```latex\s*', '', response)
-    response = re.sub(r'```\s*', '', response)
+    response = re.sub(r"```latex\s*", "", response)
+    response = re.sub(r"```\s*", "", response)
     response = response.strip()
 
-    start = response.find('\\documentclass')
+    start = response.find("\\documentclass")
     if start == -1:
         return response
 
     latex = response[start:]
     # Remove any \end{document} that snuck in
-    latex = re.sub(r'\\end\{document\}', '', latex)
+    latex = re.sub(r"\\end\{document\}", "", latex)
     return latex.rstrip()
 
 
 def _extract_latex_continuation(response: str) -> str:
     """Extract continuation LaTeX (sections + bibliography only)."""
-    response = re.sub(r'```latex\s*', '', response)
-    response = re.sub(r'```\s*', '', response)
+    response = re.sub(r"```latex\s*", "", response)
+    response = re.sub(r"```\s*", "", response)
     response = response.strip()
 
     # If AI accidentally included a full preamble, strip it
-    if '\\documentclass' in response:
-        section_match = re.search(r'\\section\{', response)
-        biblio_match = re.search(r'\\begin\{thebibliography\}', response)
+    if "\\documentclass" in response:
+        section_match = re.search(r"\\section\{", response)
+        biblio_match = re.search(r"\\begin\{thebibliography\}", response)
 
         start = None
         if section_match:
@@ -858,14 +836,14 @@ def _extract_latex_continuation(response: str) -> str:
 def _merge_latex_parts(part1: str, part2: str) -> str:
     """Merge two LaTeX parts into one complete document."""
     # Remove placeholder comment from part 1
-    part1 = re.sub(r'%\s*BIBLIOGRAPHY_PLACEHOLDER.*', '', part1)
+    part1 = re.sub(r"%\s*BIBLIOGRAPHY_PLACEHOLDER.*", "", part1)
     part1 = part1.rstrip()
 
     # Ensure part 2 ends with \end{document}
-    if '\\end{document}' not in part2:
-        part2 = part2.rstrip() + '\n\\end{document}'
+    if "\\end{document}" not in part2:
+        part2 = part2.rstrip() + "\n\\end{document}"
 
-    return part1 + '\n\n' + part2
+    return part1 + "\n\n" + part2
 
 
 def _extract_bibliography(document: dict) -> str:
@@ -876,10 +854,7 @@ def _extract_bibliography(document: dict) -> str:
     Returns complete \\begin{thebibliography}...\\end block
     or empty string if no references found.
     """
-    refs = [
-        block for block in document.get('structure', [])
-        if block.get('type') == 'reference'
-    ]
+    refs = [block for block in document.get("structure", []) if block.get("type") == "reference"]
 
     if not refs:
         return ""
@@ -887,23 +862,23 @@ def _extract_bibliography(document: dict) -> str:
     lines = [f"\\begin{{thebibliography}}{{{len(refs)}}}"]
 
     for i, ref in enumerate(refs, 1):
-        text = ref.get('text', '').strip()
+        text = ref.get("text", "").strip()
 
         # Remove leading [N] from reference text
-        text = re.sub(r'^\[\d+\]\s*', '', text)
+        text = re.sub(r"^\[\d+\]\s*", "", text)
 
         # Escape LaTeX special chars (basic)
-        text = text.replace('&', '\\&')
-        text = text.replace('%', '\\%')
-        text = text.replace('#', '\\#')
-        text = text.replace('_', '\\_')
+        text = text.replace("&", "\\&")
+        text = text.replace("%", "\\%")
+        text = text.replace("#", "\\#")
+        text = text.replace("_", "\\_")
 
         lines.append(f"\\bibitem{{ref{i}}}")
         lines.append(text)
         lines.append("")
 
     lines.append("\\end{thebibliography}")
-    return '\n'.join(lines)
+    return "\n".join(lines)
 
 
 def _replace_bibliography(latex: str, real_bib: str) -> str:
@@ -914,7 +889,7 @@ def _replace_bibliography(latex: str, real_bib: str) -> str:
     When real_bib is empty, deduplicates by keeping the last block.
     """
     bib_pattern = re.compile(
-        r'\\begin\{thebibliography\}.*?\\end\{thebibliography\}',
+        r"\\begin\{thebibliography\}.*?\\end\{thebibliography\}",
         re.DOTALL,
     )
 
@@ -925,18 +900,13 @@ def _replace_bibliography(latex: str, real_bib: str) -> str:
         if len(all_bibs) > 1:
             last_bib_text = all_bibs[-1].group(0)
             # Remove all occurrences
-            latex = bib_pattern.sub('', latex)
+            latex = bib_pattern.sub("", latex)
             # Re-insert the last (best) one before \end{document}
-            end_doc = latex.rfind('\\end{document}')
+            end_doc = latex.rfind("\\end{document}")
             if end_doc != -1:
-                latex = (
-                    latex[:end_doc]
-                    + '\n' + last_bib_text + '\n'
-                    + latex[end_doc:]
-                )
+                latex = latex[:end_doc] + "\n" + last_bib_text + "\n" + latex[end_doc:]
             logger.info(
-                f"Deduplicated {len(all_bibs)} bibliography blocks "
-                f"— kept final part's bibliography"
+                f"Deduplicated {len(all_bibs)} bibliography blocks — kept final part's bibliography"
             )
         return latex
 
@@ -944,14 +914,10 @@ def _replace_bibliography(latex: str, real_bib: str) -> str:
 
     if not all_bibs:
         # No bibliography found — insert before \end{document}
-        end_doc = latex.rfind('\\end{document}')
+        end_doc = latex.rfind("\\end{document}")
         if end_doc != -1:
-            return (
-                latex[:end_doc]
-                + '\n' + real_bib + '\n'
-                + latex[end_doc:]
-            )
-        return latex + '\n' + real_bib
+            return latex[:end_doc] + "\n" + real_bib + "\n" + latex[end_doc:]
+        return latex + "\n" + real_bib
 
     if len(all_bibs) == 1:
         result = bib_pattern.sub(real_bib, latex, count=1)
@@ -961,22 +927,15 @@ def _replace_bibliography(latex: str, real_bib: str) -> str:
     # Multiple bibliographies — remove ALL, then insert real_bib once
     result = latex
     for bib_match in reversed(all_bibs):
-        result = result[:bib_match.start()] + result[bib_match.end():]
+        result = result[: bib_match.start()] + result[bib_match.end() :]
 
-    end_doc = result.rfind('\\end{document}')
+    end_doc = result.rfind("\\end{document}")
     if end_doc != -1:
-        result = (
-            result[:end_doc]
-            + '\n' + real_bib + '\n'
-            + result[end_doc:]
-        )
+        result = result[:end_doc] + "\n" + real_bib + "\n" + result[end_doc:]
     else:
-        result = result + '\n' + real_bib
+        result = result + "\n" + real_bib
 
-    logger.info(
-        f"Replaced {len(all_bibs)} bibliography blocks "
-        f"with extracted references"
-    )
+    logger.info(f"Replaced {len(all_bibs)} bibliography blocks with extracted references")
     return result
 
 
@@ -988,15 +947,20 @@ def _preprocess_content(structured_content: str) -> str:
     Moves footnote-heavy blocks from the document start
     to the end so they don't inflate the title area.
     """
-    footnote_symbols = ['∗', '†', '‡', '§', '¶',
-                        'Equal contribution', 'Work performed while at']
+    footnote_symbols = ["∗", "†", "‡", "§", "¶", "Equal contribution", "Work performed while at"]
 
     affiliation_keywords = [
-        'university', 'college', 'institute', 'department',
-        'dept', 'school', 'laboratory', 'lab',
+        "university",
+        "college",
+        "institute",
+        "department",
+        "dept",
+        "school",
+        "laboratory",
+        "lab",
     ]
 
-    lines = structured_content.split('\n\n')
+    lines = structured_content.split("\n\n")
     if not lines:
         return structured_content
 
@@ -1006,10 +970,8 @@ def _preprocess_content(structured_content: str) -> str:
     for i, block in enumerate(lines[:10]):
         word_count = len(block.split())
         has_footnote_symbol = any(sym in block for sym in footnote_symbols)
-        has_email = '@' in block
-        is_affiliation = any(
-            kw in block.lower() for kw in affiliation_keywords
-        )
+        has_email = "@" in block
+        is_affiliation = any(kw in block.lower() for kw in affiliation_keywords)
 
         # Only move blocks that are clearly footnotes:
         # must have a footnote symbol, be long, appear after
@@ -1030,7 +992,7 @@ def _preprocess_content(structured_content: str) -> str:
         result_lines.append("\n[AUTHOR NOTES]")
         result_lines.extend(footnotes)
 
-    return '\n\n'.join(result_lines)
+    return "\n\n".join(result_lines)
 
 
 def _is_complete_latex(latex: str) -> bool:
@@ -1066,21 +1028,21 @@ def _extract_latex(response: str) -> str:
     Also removes figure references we cannot fulfill.
     """
     # Remove markdown code fences
-    response = re.sub(r'```latex\s*', '', response)
-    response = re.sub(r'```\s*', '', response)
+    response = re.sub(r"```latex\s*", "", response)
+    response = re.sub(r"```\s*", "", response)
     response = response.strip()
 
     # Find LaTeX boundaries
-    start = response.find('\\documentclass')
+    start = response.find("\\documentclass")
     if start == -1:
         return response  # Return as-is, validation will catch it
 
-    end_marker = '\\end{document}'
+    end_marker = "\\end{document}"
     end = response.rfind(end_marker)
     if end == -1:
         latex = response[start:]
     else:
-        latex = response[start:end + len(end_marker)]
+        latex = response[start : end + len(end_marker)]
 
     # Post-process
     latex = _postprocess_latex(latex)
@@ -1099,22 +1061,22 @@ def _fix_citations(latex: str) -> str:
 
     Falls back to \\textsuperscript{N} if no \\bibitem{} exist.
     """
-    bibitems = re.findall(r'\\bibitem\{([^}]+)\}', latex)
+    bibitems = re.findall(r"\\bibitem\{([^}]+)\}", latex)
 
     if not bibitems:
-        if not re.search(r'\[\?\]', latex):
+        if not re.search(r"\[\?\]", latex):
             return latex
         # No bibliography at all — number as superscripts
         counter = [0]
 
         def _sup(_m: re.Match) -> str:
             counter[0] += 1
-            return f'\\textsuperscript{{{counter[0]}}}'
+            return f"\\textsuperscript{{{counter[0]}}}"
 
-        return re.sub(r'\[\?\]', _sup, latex)
+        return re.sub(r"\[\?\]", _sup, latex)
 
     # Split body / bibliography so we only touch the body
-    bib_start = latex.find('\\begin{thebibliography}')
+    bib_start = latex.find("\\begin{thebibliography}")
     if bib_start > 0:
         body, bib = latex[:bib_start], latex[bib_start:]
     else:
@@ -1129,27 +1091,24 @@ def _fix_citations(latex: str) -> str:
 
     def _resolve_group(m: re.Match) -> str:
         """Convert [a, ?, b] to \\cite{key_a, key_?, key_b}."""
-        parts = [p.strip() for p in m.group(1).split(',')]
+        parts = [p.strip() for p in m.group(1).split(",")]
         keys: list[str] = []
         for p in parts:
-            if p == '?':
+            if p == "?":
                 keys.append(_next_cite())
             elif p.isdigit():
                 idx = int(p) - 1
-                keys.append(
-                    bibitems[idx] if 0 <= idx < len(bibitems)
-                    else _next_cite()
-                )
+                keys.append(bibitems[idx] if 0 <= idx < len(bibitems) else _next_cite())
             else:
                 keys.append(p)
-        return f'\\cite{{{",".join(keys)}}}'
+        return f"\\cite{{{','.join(keys)}}}"
 
     # Replace mixed/group citations containing ? first
-    body = re.sub(r'\[([^\]]*\?[^\]]*)\]', _resolve_group, body)
+    body = re.sub(r"\[([^\]]*\?[^\]]*)\]", _resolve_group, body)
     # Replace any remaining standalone [?]
     body = re.sub(
-        r'\[\?\]',
-        lambda _m: f'\\cite{{{_next_cite()}}}',
+        r"\[\?\]",
+        lambda _m: f"\\cite{{{_next_cite()}}}",
         body,
     )
     return body + bib
@@ -1165,18 +1124,19 @@ def _postprocess_latex(latex: str) -> str:
     3. Remove \\input{} and \\include{} commands
     4. Fix overly long enumerate lists (>20 items → itemize)
     """
+
     def replace_includegraphics(match: re.Match) -> str:
         filename = match.group(1)
-        display_name = filename.replace('{', '').replace('}', '')
-        display_name = display_name.split('/')[-1][:30]
+        display_name = filename.replace("{", "").replace("}", "")
+        display_name = display_name.split("/")[-1][:30]
         return (
-            r'\fbox{\parbox{0.4\textwidth}{'
-            r'\centering\small[Figure: ' + display_name + r']}}'
+            r"\fbox{\parbox{0.4\textwidth}{"
+            r"\centering\small[Figure: " + display_name + r"]}}"
         )
 
     # Fix 1: Replace \includegraphics with placeholder
     latex = re.sub(
-        r'\\includegraphics(?:\[[^\]]*\])?\{([^}]+)\}',
+        r"\\includegraphics(?:\[[^\]]*\])?\{([^}]+)\}",
         replace_includegraphics,
         latex,
     )
@@ -1184,49 +1144,49 @@ def _postprocess_latex(latex: str) -> str:
     # Fix 2: Replace enumerate used for references
     # Pattern: \begin{enumerate} containing \bibitem
     # This causes "Counter too large" with many refs
-    if '\\bibitem' in latex and '\\begin{enumerate}' in latex:
+    if "\\bibitem" in latex and "\\begin{enumerate}" in latex:
         latex = re.sub(
-            r'\\begin\{enumerate\}(.*?)\\end\{enumerate\}',
+            r"\\begin\{enumerate\}(.*?)\\end\{enumerate\}",
             lambda m: (
-                '\\begin{thebibliography}{99}'
-                + m.group(1)
-                + '\\end{thebibliography}'
-            ) if '\\bibitem' in m.group(1) else m.group(0),
+                ("\\begin{thebibliography}{99}" + m.group(1) + "\\end{thebibliography}")
+                if "\\bibitem" in m.group(1)
+                else m.group(0)
+            ),
             latex,
             flags=re.DOTALL,
         )
 
     # Fix 3: Remove \input{} and \include{} — reference missing files
-    latex = re.sub(r'\\input\{[^}]+\}', '', latex)
-    latex = re.sub(r'\\include\{[^}]+\}', '', latex)
+    latex = re.sub(r"\\input\{[^}]+\}", "", latex)
+    latex = re.sub(r"\\include\{[^}]+\}", "", latex)
 
     # Fix 4: Fix overly long enumerate lists
     # If > 20 items, convert to itemize (bullet points)
     def fix_long_enumerate(match: re.Match) -> str:
         content = match.group(1)
-        item_count = content.count('\\item')
+        item_count = content.count("\\item")
         if item_count > 20:
-            return '\\begin{itemize}' + content + '\\end{itemize}'
+            return "\\begin{itemize}" + content + "\\end{itemize}"
         return match.group(0)
 
     latex = re.sub(
-        r'\\begin\{enumerate\}(.*?)\\end\{enumerate\}',
+        r"\\begin\{enumerate\}(.*?)\\end\{enumerate\}",
         fix_long_enumerate,
         latex,
         flags=re.DOTALL,
     )
 
     # Fix 5: Replace dagger symbols not available in XeLaTeX TU encoding
-    latex = latex.replace(r'\textddagger', r'\ddag')
-    latex = latex.replace(r'\textdagger', r'\dag')
+    latex = latex.replace(r"\textddagger", r"\ddag")
+    latex = latex.replace(r"\textdagger", r"\dag")
 
     # Fix 6: Replace other TU-encoding-incompatible symbols
     for old, new in (
-        (r'\textparagraph', r'\P'),
-        (r'\textsection', r'\S'),
-        (r'\texttrademark', 'TM'),
-        (r'\textordfeminine', 'a'),
-        (r'\textordmasculine', 'o'),
+        (r"\textparagraph", r"\P"),
+        (r"\textsection", r"\S"),
+        (r"\texttrademark", "TM"),
+        (r"\textordfeminine", "a"),
+        (r"\textordmasculine", "o"),
     ):
         latex = latex.replace(old, new)
 
@@ -1236,11 +1196,11 @@ def _postprocess_latex(latex: str) -> str:
     # Fix 8: Replace undefined control sequences common in AI output
     # Only replace when clearly used as a command (not part of a longer word)
     undefined_fixes = [
-        (r'\\pd(?=[^a-zA-Z])', r'\\partial'),
-        (r'\\R(?=[^a-zA-Z])', r'\\mathbb{R}'),
-        (r'\\N(?=[^a-zA-Z])', r'\\mathbb{N}'),
-        (r'\\Z(?=[^a-zA-Z])', r'\\mathbb{Z}'),
-        (r'\\norm(?=[^a-zA-Z])', r'\\|\\cdot\\|'),
+        (r"\\pd(?=[^a-zA-Z])", r"\\partial"),
+        (r"\\R(?=[^a-zA-Z])", r"\\mathbb{R}"),
+        (r"\\N(?=[^a-zA-Z])", r"\\mathbb{N}"),
+        (r"\\Z(?=[^a-zA-Z])", r"\\mathbb{Z}"),
+        (r"\\norm(?=[^a-zA-Z])", r"\\|\\cdot\\|"),
     ]
     for pattern, replacement in undefined_fixes:
         latex = re.sub(pattern, replacement, latex)
@@ -1250,19 +1210,19 @@ def _postprocess_latex(latex: str) -> str:
     # where each word is prefixed with its first letter:
     # "I NTRODUCTION" → "INTRODUCTION", "R ELATED W ORK" → "RELATED WORK"
     def _clean_section_title(match: re.Match) -> str:
-        cmd = match.group(1)   # "section" or "subsection" etc.
+        cmd = match.group(1)  # "section" or "subsection" etc.
         title = match.group(2)
 
         # Repair Groq's word-split artifact: "X XXXX" → "XXXXX"
         # Single uppercase letter + space + 2+ uppercase letters → rejoin
-        repaired = re.sub(r'\b([A-Z]) ([A-Z]{2,})\b', r'\1\2', title)
+        repaired = re.sub(r"\b([A-Z]) ([A-Z]{2,})\b", r"\1\2", title)
         # Apply twice to catch consecutive split words
-        repaired = re.sub(r'\b([A-Z]) ([A-Z]{2,})\b', r'\1\2', repaired)
+        repaired = re.sub(r"\b([A-Z]) ([A-Z]{2,})\b", r"\1\2", repaired)
 
         # Strip leading Roman numeral prefix "IV. " or "4 V. "
-        cleaned = re.sub(r'^\d*\s*[IVXivx]+\.\s+', '', repaired).strip()
+        cleaned = re.sub(r"^\d*\s*[IVXivx]+\.\s+", "", repaired).strip()
         # Strip leading single-letter dot prefix "A. "
-        cleaned = re.sub(r'^[A-Z]\.\s+', '', cleaned).strip()
+        cleaned = re.sub(r"^[A-Z]\.\s+", "", cleaned).strip()
 
         # Convert ALL-CAPS to Title Case only when no single-char fragments
         words = cleaned.split()
@@ -1271,10 +1231,10 @@ def _postprocess_latex(latex: str) -> str:
         if all_caps and not has_fragments:
             cleaned = cleaned.title()
 
-        return f'\\{cmd}{{{cleaned}}}'
+        return f"\\{cmd}{{{cleaned}}}"
 
     latex = re.sub(
-        r'\\((?:sub)*section\*?)\{([^}]+)\}',
+        r"\\((?:sub)*section\*?)\{([^}]+)\}",
         _clean_section_title,
         latex,
     )
@@ -1284,7 +1244,7 @@ def _postprocess_latex(latex: str) -> str:
     # as numbered enumerate items instead of \subsection{heading}\nparagraph.
     def _promote_enumerate_to_subsections(match: re.Match) -> str:
         content = match.group(1)
-        raw_items = re.split(r'\\item\s*', content)
+        raw_items = re.split(r"\\item\s*", content)
         items = [it for it in raw_items if it.strip()]
         if len(items) < 2:
             return match.group(0)
@@ -1292,10 +1252,8 @@ def _postprocess_latex(latex: str) -> str:
         # Classify each item: heading-like if first line is short
         heading_count = 0
         for item in items:
-            first_line = item.split('\n')[0].strip()
-            first_line = re.sub(
-                r'^(?:\d+[.)]\s*|[a-zA-Z][.)]\s*)', '', first_line
-            ).strip()
+            first_line = item.split("\n")[0].strip()
+            first_line = re.sub(r"^(?:\d+[.)]\s*|[a-zA-Z][.)]\s*)", "", first_line).strip()
             if 3 < len(first_line) < 80:
                 heading_count += 1
 
@@ -1304,20 +1262,18 @@ def _postprocess_latex(latex: str) -> str:
 
         promoted: list[str] = []
         for item in items:
-            lines = item.strip().split('\n', 1)
-            heading_text = re.sub(
-                r'^(?:\d+[.)]\s*|[a-zA-Z][.)]\s*)', '', lines[0].strip()
-            ).strip()
-            body = lines[1].strip() if len(lines) > 1 else ''
+            lines = item.strip().split("\n", 1)
+            heading_text = re.sub(r"^(?:\d+[.)]\s*|[a-zA-Z][.)]\s*)", "", lines[0].strip()).strip()
+            body = lines[1].strip() if len(lines) > 1 else ""
             if heading_text:
-                promoted.append(f'\\subsection{{{heading_text}}}')
+                promoted.append(f"\\subsection{{{heading_text}}}")
             if body:
                 promoted.append(body)
 
-        return '\n'.join(promoted) if promoted else match.group(0)
+        return "\n".join(promoted) if promoted else match.group(0)
 
     latex = re.sub(
-        r'\\begin\{enumerate\}(.*?)\\end\{enumerate\}',
+        r"\\begin\{enumerate\}(.*?)\\end\{enumerate\}",
         _promote_enumerate_to_subsections,
         latex,
         flags=re.DOTALL,
@@ -1328,35 +1284,35 @@ def _postprocess_latex(latex: str) -> str:
     # don't exist and XeLaTeX renders them as black rectangles.
     result_lines: list[str] = []
     in_figure = False
-    for line in latex.split('\n'):
-        if '\\begin{figure' in line:
+    for line in latex.split("\n"):
+        if "\\begin{figure" in line:
             in_figure = True
-        if '\\end{figure' in line:
+        if "\\end{figure" in line:
             in_figure = False
             result_lines.append(line)
             continue
-        if not in_figure and '\\includegraphics' in line:
+        if not in_figure and "\\includegraphics" in line:
             logger.debug(f"Removed inline graphics: {line[:80]}")
             continue
         result_lines.append(line)
-    latex = '\n'.join(result_lines)
+    latex = "\n".join(result_lines)
 
     # Fix 12: Remove orphaned \caption{} lines outside figure environments.
     # After Fix 11 strips inline \includegraphics, the AI's paired \caption{}
     # lines are left behind as floating text in the paragraph flow.
     caption_lines: list[str] = []
     in_figure = False
-    for line in latex.split('\n'):
-        if '\\begin{figure' in line:
+    for line in latex.split("\n"):
+        if "\\begin{figure" in line:
             in_figure = True
-        if '\\end{figure' in line:
+        if "\\end{figure" in line:
             in_figure = False
             caption_lines.append(line)
             continue
-        if not in_figure and line.strip().startswith('\\caption{'):
+        if not in_figure and line.strip().startswith("\\caption{"):
             logger.debug(f"Removed orphaned caption: {line[:80]}")
             continue
         caption_lines.append(line)
-    latex = '\n'.join(caption_lines)
+    latex = "\n".join(caption_lines)
 
     return latex

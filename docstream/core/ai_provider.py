@@ -104,9 +104,7 @@ class GeminiProvider(AIProvider):
                 )
 
                 if response.text:
-                    logger.info(
-                        f"Gemini responded using: {model_name}"
-                    )
+                    logger.info(f"Gemini responded using: {model_name}")
                     return response.text
 
             except Exception as e:
@@ -114,21 +112,15 @@ class GeminiProvider(AIProvider):
                 last_error = e
 
                 # Rate limit — do NOT wait, immediately try next model
-                if '429' in error_str:
-                    logger.debug(
-                        f"Gemini {model_name} rate limited, "
-                        f"trying next model"
-                    )
+                if "429" in error_str:
+                    logger.debug(f"Gemini {model_name} rate limited, trying next model")
                     continue
 
                 # Other errors — log and try next model
                 logger.debug(f"Gemini model {model_name} failed: {e}")
                 continue
 
-        raise APIError(
-            f"All Gemini models rate limited or failed. "
-            f"Last error: {last_error}"
-        )
+        raise APIError(f"All Gemini models rate limited or failed. Last error: {last_error}")
 
     def is_available(self) -> bool:
         return bool(self.api_key)
@@ -242,9 +234,9 @@ class OllamaProvider(AIProvider):
         base_url: str | None = None,
         model: str = "llama3.1:8b",
     ) -> None:
-        self.base_url = (
-            base_url or os.getenv("OLLAMA_BASE_URL", "http://localhost:11434")
-        ).rstrip("/")
+        self.base_url = (base_url or os.getenv("OLLAMA_BASE_URL", "http://localhost:11434")).rstrip(
+            "/"
+        )
         self.model = model
 
     def complete(self, prompt: str, system: str = "") -> str:
@@ -266,15 +258,12 @@ class OllamaProvider(AIProvider):
             resp.raise_for_status()
             return resp.json()["message"]["content"]
         except httpx.ConnectError as exc:
-            raise APIError(
-                f"Ollama unreachable at {self.base_url}: {exc}"
-            ) from exc
+            raise APIError(f"Ollama unreachable at {self.base_url}: {exc}") from exc
         except httpx.TimeoutException as exc:
             raise APIError("Ollama timed out after 120 s.") from exc
         except httpx.HTTPStatusError as exc:
             raise APIError(
-                f"Ollama HTTP {exc.response.status_code}: "
-                f"{exc.response.text[:200]}"
+                f"Ollama HTTP {exc.response.status_code}: {exc.response.text[:200]}"
             ) from exc
 
     def is_available(self) -> bool:
@@ -321,6 +310,7 @@ class AIProviderChain:
         """Build provider list from available environment credentials."""
         try:
             from dotenv import load_dotenv
+
             load_dotenv()
         except ImportError:
             pass  # dotenv not installed — keys must be in env already
@@ -384,7 +374,5 @@ class AIProviderChain:
                 if provider.is_available():
                     available.append("Ollama")
             else:
-                available.append(
-                    provider.__class__.__name__.replace("Provider", "")
-                )
+                available.append(provider.__class__.__name__.replace("Provider", ""))
         return available

@@ -55,8 +55,7 @@ class PPTXHandler:
             from pptx import Presentation  # python-pptx
         except ImportError as exc:
             raise ExtractionError(
-                "python-pptx is required for PPTX extraction. "
-                "Install with: pip install python-pptx"
+                "python-pptx is required for PPTX extraction. Install with: pip install python-pptx"
             ) from exc
 
         try:

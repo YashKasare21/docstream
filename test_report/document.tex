@@ -1,0 +1,47 @@
+\documentclass[12pt, a4paper]{article}
+\usepackage[margin=2.5cm]{geometry}
+\usepackage[T1]{fontenc}
+\usepackage[utf8]{inputenc}
+\usepackage{lmodern}
+\usepackage{hyperref}
+\usepackage{booktabs}
+\usepackage{graphicx}
+\usepackage{amsmath}
+\usepackage{float}
+\usepackage{setspace}
+\onehalfspacing
+
+\title{Attention Is All You Need}
+\author{Ashish Vaswani \and Noam Shazeer \and Niki Parmar \and Jakob Uszkoreit \and Llion Jones \and Aidan N. Gomez \and \L ukasz Kaiser \and Illia Polosukhin}
+\date{2 Aug 2023}
+
+\begin{document}
+
+\maketitle
+
+\begin{abstract}
+The dominant sequence transduction models are based on complex recurrent or convolutional neural networks that include an encoder and a decoder. The best performing models also connect the encoder and decoder through an attention mechanism. We propose new simple network architecture, the Transformer, based solely on attention mechanisms, dispensing with recurrence and convolutions entirely. Experiments on two machine translation tasks show these models to be superior in quality while being more parallelizable and requiring significantly less time to train. Our model achieves 28.4 BLEU on the WMT 2014 English- to-German translation task, improving over the existing best results, including ensembles, by over 2 BLEU. On the WMT 2014 English-to-French translation task, our model establishes a new single-model state-of-the-art BLEU score of 41.8 after training for 3.5 days on eight GPUs, a small fraction of the training costs of the best models from the literature. We show that the Transformer generalizes well to other tasks by applying it successfully to English constituency parsing both with large and limited training data. Equal contribution. Listing order is random. Jakob proposed replacing RNNs with self-attention and started the effort to evaluate this idea. Ashish, with Illia, designed and implemented the first Transformer models and has been crucially involved in every aspect of this work. Noam proposed scaled dot-product attention, multi-head attention and the parameter-free position representation and became the other person involved in nearly every detail. Niki designed, implemented, tuned and evaluated countless model variants in our original codebase and tensor2tensor. Llion also experimented with novel model variants, was responsible for our initial codebase, and efficient inference and visualizations. Lukasz and Aidan spent countless long days designing various parts of and implementing tensor2tensor, replacing our earlier codebase, greatly improving results and massively accelerating our research. Work performed while at Google Brain. Work performed while at Google Research. 31st Conference on Neural Information Processing Systems (NIPS 2017), Long Beach, CA, USA.
+\end{abstract}
+
+\tableofcontents
+\newpage
+
+\section{Introduction}
+Recurrent neural networks, long short-term memory [ 13 ] and gated recurrent [ ] neural networks in particular, have been firmly established as state of the art approaches in sequence modeling and transduction problems such as language modeling and machine translation [ 35 ]. Numerous efforts have since continued to push the boundaries of recurrent language models and encoder-decoder architectures [38, 24, 15]. Recurrent models typically factor computation along the symbol positions of the input and output sequences. Aligning the positions to steps in computation time, they generate a sequence of hidden states , as a function of the previous hidden state and the input for position This inherently sequential nature precludes parallelization within training examples, which becomes critical at longer sequence lengths, as memory constraints limit batching across examples. Recent work has achieved significant improvements in computational efficiency through factorization tricks [ 21 ] and conditional computation [ 32 ], while also improving model performance in case of the latter. The fundamental constraint of sequential computation, however, remains. Attention mechanisms have become an integral part of compelling sequence modeling and transduc- tion models in various tasks, allowing mode.
+
+\subsection*{Further Content Summary}
+The document continues with detailed discussions on attention mechanisms, the Transformer architecture, and experimental results. Due to truncation, a full reproduction of the original content is not possible. The final provided content appears to be a description related to a figure, which is summarized below.
+
+\begin{figure}[H]
+\centering
+\caption{Many of the attention heads exhibit behaviour that seems related to the structure of the...}
+\label{fig:attention_heads}
+\begin{itemize}
+    \item Example sentence: The Law will never be perfect, but its application should be just - this is what we are missing, in my opinion. \texttt{<EOS>} \texttt{<pad>}
+\end{itemize}
+\end{figure}
+
+\begin{thebibliography}{99}
+\end{thebibliography}
+
+\end{document}
