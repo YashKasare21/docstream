@@ -364,17 +364,22 @@ def test_format_router_raises_on_missing_file():
 # ─────────────────────────────────────────────────────────────────────────────
 
 
-def test_extract_public_api_uses_router():
-    """docstream.extract() delegates to FormatRouter.extract()."""
-    sample_blocks = [_make_block(BlockType.TEXT, "API block")]
+def test_extract_public_api_uses_extractor():
+    """docstream.extract() delegates to extract_structured()."""
+    sample_doc = {
+        "title": "Test",
+        "structure": [{"type": "paragraph", "text": "API block", "page": 1}],
+        "full_text": "API block",
+        "images": [],
+    }
 
     with patch(
-        "docstream.core.format_router.FormatRouter.extract",
-        return_value=sample_blocks,
+        "docstream.core.extractor_v2.extract_structured",
+        return_value=sample_doc,
     ) as mock_extract:
         import docstream
 
         result = docstream.extract("test.pdf")
 
     mock_extract.assert_called_once()
-    assert result == sample_blocks
+    assert result == sample_doc

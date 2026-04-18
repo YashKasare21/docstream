@@ -1,53 +1,37 @@
 """
-Tests for the public docstream functional API:
-  convert(), extract(), structure(), render(), __version__
+Tests for the public docstream v2 API:
+  convert(), extract(), generate(), ConversionResult, __version__
 """
 
-import os
 from pathlib import Path
-from unittest.mock import patch
+from unittest.mock import patch, MagicMock
 
 import pytest
 
 import docstream
-from docstream.models.document import (
-    Block,
-    BlockType,
-    ConversionResult,
-    DocumentAST,
-    DocumentMetadata,
+from docstream import ConversionResult
+
+# ---------------------------------------------------------------------------
+# Shared mock return values
+# ---------------------------------------------------------------------------
+
+SAMPLE_DOCUMENT = {
+    "title": "Test Paper",
+    "metadata": {"page_count": 1, "is_scanned": False},
+    "structure": [
+        {"type": "heading", "text": "Introduction", "level": 1, "page": 1},
+        {"type": "paragraph", "text": "Test paragraph.", "page": 1},
+    ],
+    "full_text": "Introduction\nTest paragraph.",
+    "body_font_size": 12.0,
+    "images": [],
+}
+
+SAMPLE_LATEX = (
+    r"\documentclass{article}"
+    r"\begin{document}"
+    r"\section{Introduction}Test paragraph.\end{document}"
 )
-
-# ---------------------------------------------------------------------------
-# Shared fixtures
-# ---------------------------------------------------------------------------
-
-
-@pytest.fixture
-def sample_blocks():
-    return [
-        Block(type=BlockType.TEXT, content="Hello world", page_number=0),
-        Block(type=BlockType.TEXT, content="Second paragraph", page_number=1),
-    ]
-
-
-@pytest.fixture
-def sample_ast():
-    return DocumentAST(
-        title="Test Doc",
-        metadata=DocumentMetadata(title="Test Doc"),
-    )
-
-
-@pytest.fixture
-def success_result(tmp_path):
-    return ConversionResult(
-        success=True,
-        tex_path=tmp_path / "document.tex",
-        pdf_path=tmp_path / "document.pdf",
-        processing_time_seconds=0.5,
-        template_used="report",
-    )
 
 
 # ---------------------------------------------------------------------------
@@ -56,27 +40,35 @@ def success_result(tmp_path):
 
 
 class TestExtract:
-    def test_returns_list(self, sample_blocks):
-        with patch("docstream.core.format_router.FormatRouter.extract", return_value=sample_blocks):
-            result = docstream.extract("test.pdf")
-        assert isinstance(result, list)
-
-    def test_returns_correct_count(self, sample_blocks):
-        with patch("docstream.core.format_router.FormatRouter.extract", return_value=sample_blocks):
-            result = docstream.extract("test.pdf")
-        assert len(result) == 2
-
-    def test_accepts_string_path(self, sample_blocks):
+    def test_returns_dict(self):
         with patch(
-            "docstream.core.format_router.FormatRouter.extract", return_value=sample_blocks
+            "docstream.core.extractor_v2.extract_structured",
+            return_value=SAMPLE_DOCUMENT,
+        ):
+            result = docstream.extract("test.pdf")
+        assert isinstance(result, dict)
+
+    def test_returns_document_with_structure_key(self):
+        with patch(
+            "docstream.core.extractor_v2.extract_structured",
+            return_value=SAMPLE_DOCUMENT,
+        ):
+            result = docstream.extract("test.pdf")
+        assert "structure" in result
+
+    def test_accepts_string_path(self):
+        with patch(
+            "docstream.core.extractor_v2.extract_structured",
+            return_value=SAMPLE_DOCUMENT,
         ) as mock_extract:
             docstream.extract("paper.pdf")
         mock_extract.assert_called_once()
 
-    def test_accepts_path_object(self, sample_blocks, tmp_path):
+    def test_accepts_path_object(self, tmp_path):
         pdf = tmp_path / "test.pdf"
         with patch(
-            "docstream.core.format_router.FormatRouter.extract", return_value=sample_blocks
+            "docstream.core.extractor_v2.extract_structured",
+            return_value=SAMPLE_DOCUMENT,
         ) as mock_extract:
             docstream.extract(pdf)
         mock_extract.assert_called_once()
@@ -84,103 +76,63 @@ class TestExtract:
     def test_propagates_extraction_error(self):
         from docstream.exceptions import ExtractionError
 
-        with patch("docstream.PDFExtractor") as mock_extractor:
-            mock_extractor.return_value.extract.side_effect = ExtractionError("bad file")
+        with patch(
+            "docstream.core.extractor_v2.extract_structured",
+            side_effect=ExtractionError("bad file"),
+        ):
             with pytest.raises(ExtractionError):
                 docstream.extract("bad.pdf")
 
 
 # ---------------------------------------------------------------------------
-# test_structure
+# test_generate
 # ---------------------------------------------------------------------------
 
 
-class TestStructure:
-    def test_returns_document_ast(self, sample_blocks, sample_ast):
-        with patch("docstream.DocumentStructurer") as mock_structurer:
-            mock_structurer.return_value.structure.return_value = sample_ast
-            result = docstream.structure(sample_blocks)
-        assert isinstance(result, DocumentAST)
-
-    def test_uses_env_gemini_key(self, sample_blocks, sample_ast):
-        with (
-            patch("docstream.DocumentStructurer") as mock_structurer,
-            patch.dict(
-                os.environ, {"GEMINI_API_KEY": "env-gemini-key", "GROQ_API_KEY": "env-groq"}
-            ),
+class TestGenerate:
+    def test_returns_string(self):
+        with patch(
+            "docstream.core.generator.generate_latex",
+            return_value=SAMPLE_LATEX,
         ):
-            mock_structurer.return_value.structure.return_value = sample_ast
-            docstream.structure(sample_blocks)
-        call_kwargs = mock_structurer.call_args[1]
-        assert call_kwargs["gemini_key"] == "env-gemini-key"
+            result = docstream.generate(SAMPLE_DOCUMENT, template="report")
+        assert isinstance(result, str)
 
-    def test_explicit_gemini_key_overrides_env(self, sample_blocks, sample_ast):
-        with (
-            patch("docstream.DocumentStructurer") as mock_structurer,
-            patch.dict(os.environ, {"GEMINI_API_KEY": "env-key"}),
+    def test_returns_non_empty_latex(self):
+        with patch(
+            "docstream.core.generator.generate_latex",
+            return_value=SAMPLE_LATEX,
         ):
-            mock_structurer.return_value.structure.return_value = sample_ast
-            docstream.structure(sample_blocks, gemini_key="explicit-key")
-        call_kwargs = mock_structurer.call_args[1]
-        assert call_kwargs["gemini_key"] == "explicit-key"
+            result = docstream.generate(SAMPLE_DOCUMENT, template="report")
+        assert len(result) > 0
 
-    def test_groq_key_loaded_from_env(self, sample_blocks, sample_ast):
-        with (
-            patch("docstream.DocumentStructurer") as mock_structurer,
-            patch.dict(os.environ, {"GEMINI_API_KEY": "g", "GROQ_API_KEY": "groq-env-key"}),
-        ):
-            mock_structurer.return_value.structure.return_value = sample_ast
-            docstream.structure(sample_blocks)
-        call_kwargs = mock_structurer.call_args[1]
-        assert call_kwargs["groq_key"] == "groq-env-key"
+    def test_default_template_is_report(self):
+        with patch(
+            "docstream.core.generator.generate_latex",
+            return_value=SAMPLE_LATEX,
+        ) as mock_gen:
+            docstream.generate(SAMPLE_DOCUMENT)
+        args = mock_gen.call_args
+        assert args[0][1] == "report"
 
-    def test_explicit_groq_key_overrides_env(self, sample_blocks, sample_ast):
-        with (
-            patch("docstream.DocumentStructurer") as mock_structurer,
-            patch.dict(os.environ, {"GROQ_API_KEY": "env-groq"}),
-        ):
-            mock_structurer.return_value.structure.return_value = sample_ast
-            docstream.structure(sample_blocks, groq_key="explicit-groq")
-        call_kwargs = mock_structurer.call_args[1]
-        assert call_kwargs["groq_key"] == "explicit-groq"
+    def test_ieee_template_forwarded(self):
+        with patch(
+            "docstream.core.generator.generate_latex",
+            return_value=SAMPLE_LATEX,
+        ) as mock_gen:
+            docstream.generate(SAMPLE_DOCUMENT, template="ieee")
+        args = mock_gen.call_args
+        assert args[0][1] == "ieee"
 
-
-# ---------------------------------------------------------------------------
-# test_render
-# ---------------------------------------------------------------------------
-
-
-class TestRender:
-    def test_returns_conversion_result(self, sample_ast, success_result, tmp_path):
-        with patch("docstream.DocumentRenderer") as mock_renderer:
-            mock_renderer.return_value.render.return_value = success_result
-            result = docstream.render(sample_ast, output_dir=tmp_path)
-        assert isinstance(result, ConversionResult)
-
-    def test_default_template_is_report(self, sample_ast, success_result, tmp_path):
-        with patch("docstream.DocumentRenderer") as mock_renderer:
-            mock_renderer.return_value.render.return_value = success_result
-            docstream.render(sample_ast, output_dir=tmp_path)
-        mock_renderer.assert_called_once_with(template="report")
-
-    def test_custom_template_is_forwarded(self, sample_ast, success_result, tmp_path):
-        with patch("docstream.DocumentRenderer") as mock_renderer:
-            mock_renderer.return_value.render.return_value = success_result
-            docstream.render(sample_ast, template="ieee", output_dir=tmp_path)
-        mock_renderer.assert_called_once_with(template="ieee")
-
-    def test_accepts_string_output_dir(self, sample_ast, success_result, tmp_path):
-        with patch("docstream.DocumentRenderer") as mock_renderer:
-            mock_renderer.return_value.render.return_value = success_result
-            result = docstream.render(sample_ast, output_dir=str(tmp_path))
-        assert result.success is True
-
-    def test_output_dir_passed_as_path(self, sample_ast, success_result, tmp_path):
-        with patch("docstream.DocumentRenderer") as mock_renderer:
-            mock_renderer.return_value.render.return_value = success_result
-            docstream.render(sample_ast, output_dir=str(tmp_path))
-        render_args = mock_renderer.return_value.render.call_args[0]
-        assert isinstance(render_args[1], Path)
+    def test_custom_ai_provider_forwarded(self):
+        mock_provider = MagicMock()
+        with patch(
+            "docstream.core.generator.generate_latex",
+            return_value=SAMPLE_LATEX,
+        ) as mock_gen:
+            docstream.generate(SAMPLE_DOCUMENT, ai_provider=mock_provider)
+        args = mock_gen.call_args
+        assert args[0][2] is mock_provider
 
 
 # ---------------------------------------------------------------------------
@@ -189,45 +141,124 @@ class TestRender:
 
 
 class TestConvert:
-    def test_chains_all_three_stages(self, sample_blocks, sample_ast, success_result, tmp_path):
-        with (
-            patch("docstream.extract", return_value=sample_blocks) as mock_extract,
-            patch("docstream.structure", return_value=sample_ast) as mock_structure,
-            patch("docstream.render", return_value=success_result) as mock_render,
-        ):
-            docstream.convert("paper.pdf", template="ieee", output_dir=tmp_path)
-        mock_extract.assert_called_once_with("paper.pdf")
-        mock_structure.assert_called_once_with(sample_blocks)
-        mock_render.assert_called_once_with(sample_ast, template="ieee", output_dir=Path(tmp_path))
+    def _patch_pipeline(self, tmp_path):
+        """Context manager that patches all 3 pipeline stages."""
+        tex = tmp_path / "document.tex"
+        pdf = tmp_path / "document.pdf"
+        tex.write_text(SAMPLE_LATEX)
+        pdf.write_bytes(b"%PDF-1.4")
+        return (
+            patch(
+                "docstream.core.extractor_v2.extract_structured",
+                return_value=SAMPLE_DOCUMENT,
+            ),
+            patch(
+                "docstream.core.generator.generate_latex",
+                return_value=SAMPLE_LATEX,
+            ),
+            patch(
+                "docstream.core.compiler.compile_latex",
+                return_value=(tex, pdf),
+            ),
+        )
 
-    def test_returns_conversion_result(self, sample_blocks, sample_ast, success_result, tmp_path):
-        with (
-            patch("docstream.extract", return_value=sample_blocks),
-            patch("docstream.structure", return_value=sample_ast),
-            patch("docstream.render", return_value=success_result),
-        ):
+    def test_returns_conversion_result(self, tmp_path):
+        p1, p2, p3 = self._patch_pipeline(tmp_path)
+        with p1, p2, p3:
             result = docstream.convert("paper.pdf", output_dir=tmp_path)
         assert isinstance(result, ConversionResult)
 
-    def test_default_template_report(self, sample_blocks, sample_ast, success_result, tmp_path):
-        with (
-            patch("docstream.extract", return_value=sample_blocks),
-            patch("docstream.structure", return_value=sample_ast),
-            patch("docstream.render", return_value=success_result) as mock_render,
-        ):
-            docstream.convert("paper.pdf", output_dir=tmp_path)
-        assert mock_render.call_args[1]["template"] == "report"
+    def test_success_is_true_on_happy_path(self, tmp_path):
+        p1, p2, p3 = self._patch_pipeline(tmp_path)
+        with p1, p2, p3:
+            result = docstream.convert("paper.pdf", output_dir=tmp_path)
+        assert result.success is True
 
-    def test_output_dir_forwarded_as_path(
-        self, sample_blocks, sample_ast, success_result, tmp_path
-    ):
-        with (
-            patch("docstream.extract", return_value=sample_blocks),
-            patch("docstream.structure", return_value=sample_ast),
-            patch("docstream.render", return_value=success_result) as mock_render,
+    def test_default_template_is_report(self, tmp_path):
+        p1, p2, p3 = self._patch_pipeline(tmp_path)
+        with p1, p2, p3:
+            result = docstream.convert("paper.pdf", output_dir=tmp_path)
+        assert result.template_used == "report"
+
+    def test_ieee_template_forwarded(self, tmp_path):
+        p1, p2, p3 = self._patch_pipeline(tmp_path)
+        with p1, p2, p3:
+            result = docstream.convert("paper.pdf", template="ieee", output_dir=tmp_path)
+        assert result.template_used == "ieee"
+
+    def test_tex_path_set(self, tmp_path):
+        p1, p2, p3 = self._patch_pipeline(tmp_path)
+        with p1, p2, p3:
+            result = docstream.convert("paper.pdf", output_dir=tmp_path)
+        assert result.tex_path is not None
+        assert Path(result.tex_path).suffix == ".tex"
+
+    def test_pdf_path_set(self, tmp_path):
+        p1, p2, p3 = self._patch_pipeline(tmp_path)
+        with p1, p2, p3:
+            result = docstream.convert("paper.pdf", output_dir=tmp_path)
+        assert result.pdf_path is not None
+        assert Path(result.pdf_path).suffix == ".pdf"
+
+    def test_processing_time_is_non_negative(self, tmp_path):
+        p1, p2, p3 = self._patch_pipeline(tmp_path)
+        with p1, p2, p3:
+            result = docstream.convert("paper.pdf", output_dir=tmp_path)
+        assert result.processing_time >= 0.0
+
+    def test_error_is_none_on_success(self, tmp_path):
+        p1, p2, p3 = self._patch_pipeline(tmp_path)
+        with p1, p2, p3:
+            result = docstream.convert("paper.pdf", output_dir=tmp_path)
+        assert result.error is None
+
+    def test_success_false_on_extraction_error(self, tmp_path):
+        from docstream.exceptions import ExtractionError
+
+        with patch(
+            "docstream.core.extractor_v2.extract_structured",
+            side_effect=ExtractionError("missing file"),
         ):
-            docstream.convert("paper.pdf", output_dir=str(tmp_path))
-        assert isinstance(mock_render.call_args[1]["output_dir"], Path)
+            result = docstream.convert("missing.pdf", output_dir=tmp_path)
+        assert result.success is False
+        assert result.error is not None
+
+    def test_accepts_string_output_dir(self, tmp_path):
+        p1, p2, p3 = self._patch_pipeline(tmp_path)
+        with p1, p2, p3:
+            result = docstream.convert("paper.pdf", output_dir=str(tmp_path))
+        assert result.success is True
+
+
+# ---------------------------------------------------------------------------
+# test_ConversionResult
+# ---------------------------------------------------------------------------
+
+
+class TestConversionResult:
+    def test_success_field(self):
+        r = ConversionResult(success=True)
+        assert r.success is True
+
+    def test_error_field_none_by_default(self):
+        r = ConversionResult(success=True)
+        assert r.error is None
+
+    def test_template_used_empty_by_default(self):
+        r = ConversionResult(success=True)
+        assert r.template_used == ""
+
+    def test_repr_success(self, tmp_path):
+        r = ConversionResult(
+            success=True,
+            template_used="report",
+            pdf_path=tmp_path / "doc.pdf",
+        )
+        assert "True" in repr(r)
+
+    def test_repr_failure(self):
+        r = ConversionResult(success=False, error="something failed")
+        assert "False" in repr(r)
 
 
 # ---------------------------------------------------------------------------
@@ -240,7 +271,7 @@ class TestVersion:
         assert isinstance(docstream.__version__, str)
 
     def test_version_value(self):
-        assert docstream.__version__ == "0.2.0-dev"
+        assert docstream.__version__ == "0.2.0"
 
     def test_convert_is_callable(self):
         assert callable(docstream.convert)
@@ -248,12 +279,12 @@ class TestVersion:
     def test_extract_is_callable(self):
         assert callable(docstream.extract)
 
-    def test_structure_is_callable(self):
-        assert callable(docstream.structure)
+    def test_generate_is_callable(self):
+        assert callable(docstream.generate)
 
-    def test_render_is_callable(self):
-        assert callable(docstream.render)
+    def test_conversion_result_in___all__(self):
+        assert "ConversionResult" in docstream.__all__
 
     def test_all_symbols_in___all__(self):
-        for name in ("convert", "extract", "structure", "render", "__version__"):
+        for name in ("convert", "extract", "generate", "ConversionResult"):
             assert name in docstream.__all__

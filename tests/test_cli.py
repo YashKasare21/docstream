@@ -75,7 +75,7 @@ class TestVersionFlag:
         with pytest.raises(SystemExit):
             main(["--version"])
         captured = capsys.readouterr()
-        assert "0.2.0-dev" in (captured.out + captured.err)
+        assert "0.2.0" in (captured.out + captured.err)
 
 
 # ---------------------------------------------------------------------------
