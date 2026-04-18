@@ -7,14 +7,12 @@ All AI provider calls are mocked — no real network requests are made.
 from __future__ import annotations
 
 import json
-from pathlib import Path
 from unittest.mock import MagicMock, patch
 
 import pytest
 
 from docstream.exceptions import AIUnavailableError, StructuringError
 from docstream.models.document import Block, BlockType, DocumentType, SemanticDocument
-
 
 # ─────────────────────────────────────────────────────────────────────────────
 # Helpers / fixtures
@@ -244,9 +242,7 @@ def test_build_semantic_document_correct_type():
         ],
     }
     analyzer = SemanticAnalyzer.__new__(SemanticAnalyzer)
-    doc = analyzer._build_semantic_document(
-        _resume_blocks(), ai_result, {"word_count": 50}
-    )
+    doc = analyzer._build_semantic_document(_resume_blocks(), ai_result, {"word_count": 50})
 
     assert isinstance(doc, SemanticDocument)
     assert doc.document_type == DocumentType.RESUME

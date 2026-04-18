@@ -64,16 +64,13 @@ class DOCXHandler:
             import docx  # python-docx
         except ImportError as exc:
             raise ExtractionError(
-                "python-docx is required for DOCX extraction. "
-                "Install with: pip install python-docx"
+                "python-docx is required for DOCX extraction. Install with: pip install python-docx"
             ) from exc
 
         try:
             doc = docx.Document(str(file_path))
         except Exception as exc:
-            raise ExtractionError(
-                "Could not open DOCX file. Is it a valid Word document?"
-            ) from exc
+            raise ExtractionError("Could not open DOCX file. Is it a valid Word document?") from exc
 
         blocks: list[Block] = []
 

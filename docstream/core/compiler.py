@@ -39,7 +39,7 @@ def compile_latex(
         RenderingError: If XeLaTeX fails or is not installed
         CompilationError: If LaTeX compilation produces errors
     """
-    from docstream.exceptions import RenderingError, CompilationError
+    from docstream.exceptions import CompilationError, RenderingError
 
     output_dir = Path(output_dir)
     output_dir.mkdir(parents=True, exist_ok=True)
@@ -47,8 +47,7 @@ def compile_latex(
     # Check XeLaTeX is available
     if not _xelatex_available():
         raise RenderingError(
-            "XeLaTeX not found. Install with:\n"
-            "  sudo apt install texlive-xetex texlive-latex-extra"
+            "XeLaTeX not found. Install with:\n  sudo apt install texlive-xetex texlive-latex-extra"
         )
 
     with tempfile.TemporaryDirectory() as tmpdir:
@@ -95,15 +94,10 @@ def compile_latex(
         output_pdf = output_dir / f"{filename}.pdf"
         shutil.copy2(str(pdf_file), str(output_pdf))
 
-        logger.info(
-            f"Compiled successfully: {output_pdf} "
-            f"({output_pdf.stat().st_size} bytes)"
-        )
+        logger.info(f"Compiled successfully: {output_pdf} ({output_pdf.stat().st_size} bytes)")
 
         if errors:
-            logger.warning(
-                f"Compilation warnings: {errors[:3]}"
-            )
+            logger.warning(f"Compilation warnings: {errors[:3]}")
 
         return output_tex, output_pdf
 
@@ -118,9 +112,8 @@ def _fix_unclosed_environments(latex: str) -> str:
     """
     from collections import Counter
 
-    begins = re.findall(r'\\begin\{(\w+\*?)\}', latex)
-    ends = re.findall(r'\\end\{(\w+\*?)\}', latex)
-    begin_counts: Counter[str] = Counter(begins)
+    begins = re.findall(r"\\begin\{(\w+\*?)\}", latex)
+    ends = re.findall(r"\\end\{(\w+\*?)\}", latex)
     end_counts: Counter[str] = Counter(ends)
 
     closings: list[str] = []
@@ -199,19 +192,15 @@ def _run_xelatex(
         )
     except subprocess.TimeoutExpired:
         from docstream.exceptions import CompilationError
-        raise CompilationError(
-            "XeLaTeX timed out after 120 seconds. "
-            "Document may be too complex."
-        )
+
+        raise CompilationError("XeLaTeX timed out after 120 seconds. Document may be too complex.")
 
     # Read log file
     log_file = output_dir / f"{tex_file.stem}.log"
     log_content = ""
     if log_file.exists():
         try:
-            log_content = log_file.read_text(
-                encoding="utf-8", errors="replace"
-            )
+            log_content = log_file.read_text(encoding="utf-8", errors="replace")
         except Exception:
             log_content = result.stdout + result.stderr
 
@@ -228,23 +217,23 @@ def _parse_log_errors(log_content: str) -> list[str]:
     errors: list[str] = []
 
     error_patterns = [
-        r'^! .*',                          # Fatal errors
-        r'^.*Error:.*',                    # Error lines
-        r'Undefined control sequence',     # Missing commands
-        r'Missing \$ inserted',            # Math mode errors
-        r'Runaway argument',               # Argument errors
+        r"^! .*",  # Fatal errors
+        r"^.*Error:.*",  # Error lines
+        r"Undefined control sequence",  # Missing commands
+        r"Missing \$ inserted",  # Math mode errors
+        r"Runaway argument",  # Argument errors
     ]
 
     # Ignore these common harmless warnings
     ignore_patterns = [
-        r'LaTeX Warning: Label',
-        r'LaTeX Warning: Reference',
-        r'Overfull \\hbox',
-        r'Underfull \\hbox',
-        r'LaTeX Font Warning',
+        r"LaTeX Warning: Label",
+        r"LaTeX Warning: Reference",
+        r"Overfull \\hbox",
+        r"Underfull \\hbox",
+        r"LaTeX Font Warning",
     ]
 
-    for line in log_content.split('\n'):
+    for line in log_content.split("\n"):
         line = line.strip()
         if not line:
             continue

@@ -349,8 +349,7 @@ class TemplateMatcher:
         """
         if template not in TEMPLATE_SCHEMAS:
             raise TemplateError(
-                f"Unknown template {template!r}. "
-                f"Available: {sorted(TEMPLATE_SCHEMAS)}"
+                f"Unknown template {template!r}. Available: {sorted(TEMPLATE_SCHEMAS)}"
             )
 
         schema = TEMPLATE_SCHEMAS[template]
@@ -471,9 +470,6 @@ class TemplateMatcher:
             List of ``(template_name, score)`` tuples, highest score first.
             Always contains exactly ``len(TEMPLATE_SCHEMAS)`` entries.
         """
-        scores = [
-            (name, self.score_compatibility(semantic_doc, name))
-            for name in TEMPLATE_SCHEMAS
-        ]
+        scores = [(name, self.score_compatibility(semantic_doc, name)) for name in TEMPLATE_SCHEMAS]
         scores.sort(key=lambda x: x[1], reverse=True)
         return scores

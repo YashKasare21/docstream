@@ -19,7 +19,6 @@ from __future__ import annotations
 import json
 import logging
 import re
-from pathlib import Path
 
 from docstream.core.ai_provider import AIProviderChain
 from docstream.exceptions import StructuringError
@@ -104,9 +103,7 @@ class SemanticAnalyzer:
     # Pass 1 — heuristics
     # -------------------------------------------------------------------------
 
-    def _heuristic_analysis(
-        self, blocks: list[Block]
-    ) -> tuple[DocumentType, dict]:
+    def _heuristic_analysis(self, blocks: list[Block]) -> tuple[DocumentType, dict]:
         """Fast pattern-based document type detection — no AI required.
 
         Checks for strong signals in the first 20 blocks:
@@ -127,8 +124,12 @@ class SemanticAnalyzer:
 
         # Resume signals
         resume_signals = [
-            "curriculum vitae", "resume", "work experience",
-            "employment history", "objective:", "summary:",
+            "curriculum vitae",
+            "resume",
+            "work experience",
+            "employment history",
+            "objective:",
+            "summary:",
             "references available",
         ]
         if any(s in preview_text for s in resume_signals):
@@ -136,9 +137,15 @@ class SemanticAnalyzer:
 
         # Research paper signals (need 3+ to reduce false positives)
         paper_signals = [
-            "abstract", "keywords:", "introduction",
-            "methodology", "results", "conclusion",
-            "references", "doi:", "arxiv",
+            "abstract",
+            "keywords:",
+            "introduction",
+            "methodology",
+            "results",
+            "conclusion",
+            "references",
+            "doi:",
+            "arxiv",
         ]
         paper_score = sum(1 for s in paper_signals if s in preview_text)
         if paper_score >= 3:
@@ -151,8 +158,10 @@ class SemanticAnalyzer:
 
         # Report / academic signals
         report_signals = [
-            "executive summary", "table of contents",
-            "appendix", "chapter ",
+            "executive summary",
+            "table of contents",
+            "appendix",
+            "chapter ",
         ]
         if any(s in preview_text for s in report_signals):
             return DocumentType.ACADEMIC_REPORT, metadata
@@ -302,9 +311,7 @@ Rules:
         start = cleaned.find("{")
         end = cleaned.rfind("}") + 1
         if start == -1 or end == 0:
-            raise StructuringError(
-                "AI returned invalid response — no JSON object found"
-            )
+            raise StructuringError("AI returned invalid response — no JSON object found")
 
         json_str = cleaned[start:end]
 
@@ -316,9 +323,7 @@ Rules:
         # Validate required fields
         for field in ("document_type", "confidence", "chunks"):
             if field not in result:
-                raise StructuringError(
-                    f"AI response missing required field: '{field}'"
-                )
+                raise StructuringError(f"AI response missing required field: '{field}'")
 
         return result
 
@@ -366,8 +371,7 @@ Rules:
             **{
                 k: v
                 for k, v in ai_result.get("metadata", {}).items()
-                if k != "note"
-                and not k.endswith("_fields")
+                if k != "note" and not k.endswith("_fields")
             },
         }
 
