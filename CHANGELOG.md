@@ -7,6 +7,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### v2.0.0-dev
+
+#### Added
+- **Multi-format extraction** — support for PDF, DOCX, PPTX, images (JPG/PNG via OCR), Markdown, and plain text input formats
+- **`FormatRouter`** — detects input file type and dispatches to the correct handler (`docstream/core/format_router.py`)
+- **Format handler suite** — six dedicated handlers: `PDFHandler`, `DOCXHandler`, `PPTXHandler`, `ImageHandler`, `MarkdownHandler`, `TextHandler` (`docstream/core/format_handlers/`)
+- **`SemanticAnalyzer`** — AI-powered document type detection (`DocumentType` enum) and semantic chunking (`docstream/core/semantic_analyzer.py`)
+- **`TemplateMatcher`** — maps `SemanticChunk` objects to template fields with compatibility scoring (`docstream/core/template_matcher.py`)
+- **`QualityChecker`** — dual-score validation: technical (compilation) + professional (layout/content) (`docstream/core/quality_checker.py`)
+- **`AIProviderChain`** — unified AI interface with automatic fallback: Gemini 1.5 Flash → Groq Llama 3.1 70B → Ollama (`docstream/core/ai_provider.py`)
+- **New dependencies** — `python-docx`, `python-pptx`, `mistune`, `ollama`, `Pillow`
+
 ---
 
 ## [0.1.0] - 2024-03-07

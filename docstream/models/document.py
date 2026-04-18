@@ -387,3 +387,153 @@ class ConversionResult(BaseModel):
     def has_warnings(self) -> bool:
         """Check if there are any warnings."""
         return len(self.warnings) > 0
+
+
+# ---------------------------------------------------------------------------
+# v2 semantic models
+# ---------------------------------------------------------------------------
+
+
+class DocumentType(StrEnum):
+    """High-level document category detected by ``SemanticAnalyzer``."""
+
+    RESUME = "resume"
+    RESEARCH_PAPER = "research_paper"
+    ACADEMIC_REPORT = "academic_report"
+    TECHNICAL_REPORT = "technical_report"
+    PRESENTATION = "presentation"
+    LETTER = "letter"
+    NOTES = "notes"
+    UNKNOWN = "unknown"
+
+
+class SemanticChunk(BaseModel):
+    """A semantically meaningful unit of document content.
+
+    Attributes:
+        chunk_type: Semantic category, e.g. ``"work_experience"``,
+                    ``"abstract"``, ``"introduction"``.
+        content: The actual text content of this chunk.
+        importance: Relevance weight in [0.0, 1.0].
+        metadata: Chunk-level key/value metadata (company, dates, etc.).
+        template_hints: Template names this chunk maps well to.
+    """
+
+    chunk_type: str
+    content: str
+    importance: float = 1.0
+    metadata: dict[str, Any] = Field(default_factory=dict)
+    template_hints: list[str] = Field(default_factory=list)
+
+
+class SemanticDocument(BaseModel):
+    """Fully analyzed document — output of ``SemanticAnalyzer.analyze()``.
+
+    Attributes:
+        document_type: Detected document category.
+        confidence: How confident the analyzer is in the type (0–1).
+        title: Detected or inferred document title.
+        language: ISO 639-1 language code (e.g. ``"en"``).
+        chunks: Ordered list of semantic chunks.
+        raw_blocks: Original blocks passed to the analyzer.
+        metadata: Global document metadata (author, email, etc.).
+        word_count: Total word count across all blocks.
+        estimated_pages: Estimated page count (word_count // 250).
+    """
+
+    document_type: DocumentType
+    confidence: float = 0.5
+    title: str = ""
+    language: str = "en"
+    chunks: list[SemanticChunk] = Field(default_factory=list)
+    raw_blocks: list[Block] = Field(default_factory=list)
+    metadata: dict[str, Any] = Field(default_factory=dict)
+    word_count: int = 0
+    estimated_pages: int = 1
+
+
+# ---------------------------------------------------------------------------
+# v2 template models
+# ---------------------------------------------------------------------------
+
+
+class TemplateField(BaseModel):
+    """Specification for a single field in a template schema.
+
+    Attributes:
+        name: Field identifier used as the key in ``TemplateData.fields``.
+        description: Human-readable description of the field's purpose.
+        required: Whether this field must be populated for a valid output.
+        chunk_types: ``SemanticChunk.chunk_type`` values that can fill this field.
+        multi: If ``True``, collect all matching chunks as a list of strings.
+               If ``False``, pick the highest-importance matching chunk.
+    """
+
+    name: str
+    description: str = ""
+    required: bool = True
+    chunk_types: list[str] = Field(default_factory=list)
+    multi: bool = False
+
+
+class TemplateSchema(BaseModel):
+    """Declares all fields expected by a LaTeX template.
+
+    Attributes:
+        template: Template name (e.g. ``"report"``, ``"resume"``).
+        description: Short human-readable description.
+        fields: Ordered list of field specifications.
+        best_for: ``DocumentType`` values this template is optimised for.
+    """
+
+    template: str
+    description: str = ""
+    fields: list[TemplateField] = Field(default_factory=list)
+    best_for: list[DocumentType] = Field(default_factory=list)
+
+
+class TemplateData(BaseModel):
+    """Filled template ready for LaTeX rendering.
+
+    Attributes:
+        template: Template name (e.g. ``"report"``, ``"resume"``).
+        fields: Mapping of field names to content strings or lists.
+        missing_required: Required fields that could not be filled.
+        warnings: Non-blocking issues to surface to the user.
+        score: Compatibility score in [0.0, 1.0].
+    """
+
+    template: str
+    fields: dict[str, Any] = Field(default_factory=dict)
+    missing_required: list[str] = Field(default_factory=list)
+    warnings: list[str] = Field(default_factory=list)
+    score: float = 0.0
+
+
+# ---------------------------------------------------------------------------
+# v2 quality models
+# ---------------------------------------------------------------------------
+
+
+class QualityReport(BaseModel):
+    """Result of quality-checking a generated LaTeX document.
+
+    Attributes:
+        technical_score:    Compilation / syntax score in [0.0, 1.0].
+        professional_score: Layout / content quality score in [0.0, 1.0].
+        overall_score:      Weighted average (0.6 × technical + 0.4 × professional).
+        passed:             ``True`` if overall_score ≥ 0.6 and no blocking errors.
+        errors:             Blocking issues that must be fixed.
+        warnings:           Non-blocking suggestions for improvement.
+        latex_log:          Raw xelatex log output (for debugging).
+        compiled_successfully: Whether xelatex produced a PDF.
+    """
+
+    technical_score: float = 0.0
+    professional_score: float = 0.0
+    overall_score: float = 0.0
+    passed: bool = False
+    errors: list[str] = Field(default_factory=list)
+    warnings: list[str] = Field(default_factory=list)
+    latex_log: str = ""
+    compiled_successfully: bool = False

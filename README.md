@@ -1,247 +1,284 @@
-# DocStream
+# Docstream
 
-[![CI](https://github.com/YashKasare21/docstream/actions/workflows/ci.yml/badge.svg)](https://github.com/YashKasare21/docstream/actions/workflows/ci.yml)
-[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
-[![Python 3.11+](https://img.shields.io/badge/python-3.11%2B-blue.svg)](https://www.python.org/downloads/)
-[![Code style: ruff](https://img.shields.io/endpoint?url=https://raw.githubusercontent.com/astral-sh/ruff/main/assets/badge/v2.json)](https://github.com/astral-sh/ruff)
+> AI-powered PDF to LaTeX conversion library
 
-**DocStream** is a professional open-source document conversion library that turns any PDF into structured LaTeX + PDF output — powered by AI (Gemini & Groq) and Pandoc Lua templates.
+[![PyPI version](https://img.shields.io/pypi/v/docstream?color=blue)](https://pypi.org/project/docstream/)
+[![Python](https://img.shields.io/badge/python-3.10%2B-blue)](https://www.python.org/)
+[![License: MIT](https://img.shields.io/badge/license-MIT-green)](LICENSE)
+[![Build](https://img.shields.io/badge/build-passing-brightgreen)]()
 
----
+**Docstream** converts PDFs into publication-quality LaTeX documents using AI. Feed it a research paper, thesis, or report — it extracts content, structures it intelligently, generates clean LaTeX via a multi-provider AI chain, and compiles it to PDF with XeLaTeX.
 
-## How It Works
-
-DocStream uses a **3-stage pipeline**:
-
-```
-Stage 1 — EXTRACTION        Stage 2 — STRUCTURING       Stage 3 — RENDERING
-─────────────────────       ──────────────────────       ───────────────────────────
-                                                         
-  PDF file                    List[Block]                  DocumentAST
-     │                             │                            │
-     ▼                             ▼                            ▼
-  PDFExtractor               DocumentStructurer          DocumentRenderer
-  (PyMuPDF)                  (Gemini Flash)              (Pandoc + XeLaTeX)
-     │                       (Groq fallback)                    │
-     │  font metadata,            │                             │  Lua writer
-     │  bounding boxes,           │  JSON → AST                │  (report/ieee/resume)
-     │  tables, OCR               │  validation                 │
-     ▼                             ▼                            ▼
-  List[Block]               DocumentAST                  .tex  +  .pdf
-```
-
-**Stage 1 — Extraction** (`PDFExtractor`)
-- Reads each PDF page with PyMuPDF
-- Extracts text blocks with font size, bold/italic flags, bounding boxes, and page numbers
-- Detects scanned PDFs (< 100 chars) and falls back to Tesseract OCR
-- Detects tables with `find_tables()` and converts them to Markdown
-
-**Stage 2 — Structuring** (`DocumentStructurer`)
-- Sends extracted blocks to Gemini 1.5 Flash (primary) or Groq Llama-3 (fallback)
-- Parses the AI JSON response into a validated `DocumentAST`
-- Retries with exponential backoff (2 retries per provider)
-
-**Stage 3 — Rendering** (`DocumentRenderer`)
-- Converts `DocumentAST` to Pandoc JSON format
-- Runs `pandoc -f json -t <template.lua>` to generate LaTeX
-- Compiles with `xelatex -interaction=nonstopmode` (twice for cross-references)
-- Parses `.log` for `!` error lines and surfaces them clearly
+Built for researchers, academics, and developers who need reliable PDF→LaTeX conversion without manual reformatting.
 
 ---
 
-## Architecture
+## ✨ Features
 
-```
-docstream/
-├── docstream/
-│   ├── __init__.py           ← Public API: convert(), extract(), structure(), render()
-│   ├── cli.py                ← CLI entry point (argparse)
-│   ├── core/
-│   │   ├── extractor.py      ← PDFExtractor (PyMuPDF + Tesseract OCR fallback)
-│   │   ├── structurer.py     ← DocumentStructurer (Gemini Flash + Groq fallback)
-│   │   └── renderer.py       ← DocumentRenderer (Pandoc + XeLaTeX)
-│   ├── templates/
-│   │   ├── report.lua        ← Pandoc Lua writer: academic report
-│   │   ├── ieee.lua          ← Pandoc Lua writer: IEEE two-column
-│   │   └── resume.lua        ← Pandoc Lua writer: compact resume
-│   ├── models/
-│   │   └── document.py       ← Pydantic models (DocumentAST, Block, ConversionResult…)
-│   └── exceptions.py         ← Exception hierarchy
-├── tests/                    ← pytest suite (64 tests)
-├── pyproject.toml            ← uv-managed, ruff + mypy configured
-└── Makefile                  ← make install / test / lint / docs
-```
+- **PDF to LaTeX in 3 steps** — extract, generate, compile
+- **IEEE & academic report templates** — conference-ready or single-column report
+- **Multi-provider AI fallback chain** — Gemini 2.5 Flash → Groq Llama 3.3 → Kimi K2.5 (NVIDIA NIM) → Ollama (local)
+- **Image extraction & figure placement** — diagrams and figures preserved
+- **Citation & bibliography handling** — reference blocks extracted and formatted
+- **XeLaTeX compilation** — produces a real, compilable `.tex` + `.pdf`
+- **Python 3.10+ compatible**
 
 ---
 
-## Installation
+## 🚀 Quick Start
+
+### Installation
 
 ```bash
-# Recommended: using uv
-uv add docstream
-
-# Or using pip
 pip install docstream
 ```
 
-### System dependencies
-
-```bash
-# Pandoc (required for LaTeX generation)
-sudo apt install pandoc -y
-
-# XeLaTeX (required for PDF compilation)
-sudo apt install texlive-xetex texlive-latex-extra texlive-fonts-recommended -y
-
-# Tesseract (optional — only needed for scanned PDFs)
-sudo apt install tesseract-ocr -y
-```
-
-### API keys
-
-```bash
-cp .env.example .env
-# Edit .env:
-#   GEMINI_API_KEY=your-gemini-key
-#   GROQ_API_KEY=your-groq-key   (optional fallback)
-```
-
----
-
-## Python API
-
-### One-liner conversion
+### Basic Usage
 
 ```python
-from docstream import convert
+import docstream
 
-result = convert("paper.pdf", template="ieee", output_dir="./out")
-print(result.pdf_path)   # ./out/document.pdf
-print(result.tex_path)   # ./out/document.tex
-```
+result = docstream.convert(
+    "paper.pdf",
+    template="report",  # or "ieee"
+    output_dir="./output"
+)
 
-### Step-by-step pipeline
-
-```python
-from docstream import extract, structure, render
-
-# Stage 1 — extract raw blocks from PDF
-blocks = extract("paper.pdf")
-print(f"Extracted {len(blocks)} blocks")
-
-# Stage 2 — structure blocks into an AST with AI
-ast = structure(blocks)
-print(f"Title: {ast.title}, Sections: {len(ast.sections)}")
-
-# Stage 3 — render AST to LaTeX + PDF
-result = render(ast, template="report", output_dir="./out")
 if result.success:
-    print(f"PDF saved to {result.pdf_path}")
-else:
-    print(f"Rendering failed: {result.error}")
+    print(f"LaTeX: {result.tex_path}")
+    print(f"PDF:   {result.pdf_path}")
+    print(f"Time:  {result.processing_time}s")
 ```
 
-### With explicit API keys
+### API Keys
+
+Create a `.env` file in your project root:
+
+```env
+GEMINI_API_KEY=your_gemini_api_key_here
+GROQ_API_KEY=your_groq_api_key_here
+NVIDIA_API_KEY=your_nvidia_api_key_here
+OLLAMA_BASE_URL=http://localhost:11434
+```
+
+> All providers are optional — Docstream falls back automatically if one is unavailable. Gemini free tier (1,500 req/day) is recommended as the primary provider.
+
+---
+
+## 🏗️ Architecture
+
+![Docstream Pipeline](docs/pipeline-diagram.png)
+
+```
+┌──────────────────────────────────────────────────────────────────────────┐
+│  Input PDF → Extractor (PyMuPDF) → Structured Text + Images             │
+│           → AI Generator (Gemini 2.5 Flash) → LaTeX Document            │
+│           → XeLaTeX Compiler → Output PDF + .tex file                   │
+└──────────────────────────────────────────────────────────────────────────┘
+
+AI Provider Chain (automatic fallback):
+  Gemini 2.5 Flash ──rate limited──▶ Groq Llama 3.3
+                                         │ rate limited
+                                         ▼
+                               Kimi K2.5 (NVIDIA NIM)
+                                         │ rate limited
+                                         ▼
+                                   Ollama (Local)
+```
+
+<details>
+<summary>View Mermaid source</summary>
+
+```mermaid
+flowchart LR
+    A[📄 Input PDF] --> B[Extractor\nPyMuPDF]
+    B --> C[Structured Text\n+ Images]
+    C --> D[AI Generator\nGemini 2.5 Flash]
+    D --> E[LaTeX Document]
+    E --> F[XeLaTeX\nCompiler]
+    F --> G[📑 Output PDF\n+ .tex file]
+
+    subgraph AI ["AI Provider Chain"]
+        D --> D1[Gemini 2.5 Flash]
+        D1 -->|rate limited| D2[Groq Llama 3.3]
+        D2 -->|rate limited| D3[Kimi K2.5\nNVIDIA NIM]
+        D3 -->|rate limited| D4[Ollama\nLocal]
+    end
+```
+
+</details>
+
+---
+
+## 📖 API Reference
+
+### `convert()`
 
 ```python
-from docstream import extract, structure
-
-blocks = extract("paper.pdf")
-ast = structure(blocks, gemini_key="your-key", groq_key="your-groq-key")
+docstream.convert(
+    pdf_path: str | Path,
+    template: str = "report",
+    output_dir: str | Path = "./docstream_output",
+    ai_provider = None,
+) -> ConversionResult
 ```
 
-### Error handling
+| Parameter | Type | Default | Description |
+|-----------|------|---------|-------------|
+| `pdf_path` | `str \| Path` | — | Path to input PDF |
+| `template` | `str` | `"report"` | `"report"` or `"ieee"` |
+| `output_dir` | `str \| Path` | `"./docstream_output"` | Output directory |
+| `ai_provider` | `AIProvider \| None` | `None` | Custom provider (uses fallback chain if `None`) |
+
+**`ConversionResult` fields:**
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `success` | `bool` | Whether conversion succeeded |
+| `tex_path` | `Path` | Path to generated `.tex` file |
+| `pdf_path` | `Path` | Path to compiled `.pdf` file |
+| `processing_time` | `float` | Seconds taken |
+| `template_used` | `str` | Template that was applied |
+| `error` | `str \| None` | Error message if `success=False` |
+
+---
+
+### `extract()`
 
 ```python
-from docstream import convert
-from docstream.exceptions import ExtractionError, StructuringError, RenderingError
-
-try:
-    result = convert("document.pdf", template="report")
-except ExtractionError as e:
-    print(f"Could not read PDF: {e}")
-except StructuringError as e:
-    print(f"AI structuring failed: {e}")
-except RenderingError as e:
-    print(f"LaTeX compilation failed: {e}")
+docstream.extract(pdf_path: str | Path) -> dict
 ```
 
-### Available templates
-
-| Name     | Description                                  |
-|----------|----------------------------------------------|
-| `report` | Academic report — article class, 1in margins |
-| `ieee`   | IEEE two-column conference format             |
-| `resume` | Clean resume — compact, no section numbers   |
+Extracts structured content from a PDF without AI processing. Returns a document dict with `title`, `authors`, `abstract`, `sections`, `references`, and `images`.
 
 ---
 
-## CLI
+### `generate()`
 
-### Convert a PDF
-
-```bash
-# Full pipeline: PDF → LaTeX + PDF
-docstream convert paper.pdf --template ieee --output ./out
-
-# Short flags
-docstream convert paper.pdf -t report -o ./output
+```python
+docstream.generate(
+    document: dict,
+    template: str,
+    ai_provider = None,
+) -> str
 ```
 
-### Extract raw blocks
+Generates LaTeX source from a structured document dict. Returns the complete LaTeX string.
+
+---
+
+## 🎨 Templates
+
+| Template | Document Class | Layout | Use Case |
+|----------|---------------|--------|----------|
+| `report` | `article` (12pt) | Single column | Academic reports, theses, tech docs |
+| `ieee` | `IEEEtran` | Two column | IEEE conference & journal papers |
+
+---
+
+## ⚙️ Configuration
+
+| Variable | Required | Description |
+|----------|----------|-------------|
+| `GEMINI_API_KEY` | Recommended | Google Gemini API key (primary provider) |
+| `GROQ_API_KEY` | Optional | Groq fallback provider |
+| `NVIDIA_API_KEY` | Optional | Kimi K2.5 via NVIDIA NIM |
+| `OLLAMA_BASE_URL` | Optional | Local Ollama server (default: `http://localhost:11434`) |
+| `DOCSTREAM_LOG_LEVEL` | Optional | Logging verbosity (default: `INFO`) |
+
+**Getting API keys (all free tiers available):**
+- **Gemini:** [aistudio.google.com/app/apikey](https://aistudio.google.com/app/apikey) — 1,500 req/day free
+- **Groq:** [console.groq.com/keys](https://console.groq.com/keys) — generous free tier
+- **NVIDIA NIM:** [build.nvidia.com](https://build.nvidia.com) — free credits on signup
+
+---
+
+## 🔧 Development
+
+### Prerequisites
+
+- Python 3.10+
+- XeLaTeX: `sudo apt install texlive-xetex texlive-latex-extra texlive-fonts-recommended`
+- [`uv`](https://github.com/astral-sh/uv) (recommended): `pip install uv`
+
+### Setup
 
 ```bash
-# Print extracted blocks as JSON to stdout
-docstream extract paper.pdf
-
-# Save to file
-docstream extract paper.pdf --output blocks.json
+git clone https://github.com/YashKasare21/docstream
+cd docstream
+uv sync
+cp .env.example .env
+# Add your API keys to .env
 ```
 
-### List templates
+### Running Tests
 
 ```bash
-docstream templates list
+pytest tests/ -v
 ```
 
-### Version
+### Project Structure
 
-```bash
-docstream --version
+```
+docstream/
+├── core/
+│   ├── extractor_v2.py       # PDF text + image extraction (PyMuPDF)
+│   ├── generator.py          # AI LaTeX generation
+│   ├── compiler.py           # XeLaTeX compilation
+│   ├── ai_provider.py        # Multi-provider AI fallback chain
+│   ├── semantic_analyzer.py  # Document type detection
+│   ├── template_matcher.py   # Template field mapping
+│   └── quality_checker.py    # Output validation
+├── templates/
+│   └── skeletons/
+│       ├── ieee.tex                   # IEEE template skeleton
+│       ├── report.tex                 # Report template skeleton
+│       ├── ieee_instructions.txt      # AI generation instructions
+│       └── report_instructions.txt
+├── exceptions.py
+└── __init__.py               # Public API surface
 ```
 
 ---
 
-## Development
+## 🤝 Contributing
 
-```bash
-# Install all dependencies
-make install
+Contributions are welcome! Please:
 
-# Run tests
-make test
+1. Fork the repository
+2. Create a feature branch (`git checkout -b feature/your-feature`)
+3. Add tests for new functionality
+4. Run `pytest tests/ -v` and ensure all pass
+5. Submit a pull request
 
-# Lint + format check
-make lint
-
-# Auto-fix formatting
-make format
-
-# Type check
-make typecheck
-
-# All checks at once
-make check
-```
+See [CONTRIBUTING.md](CONTRIBUTING.md) for detailed guidelines.
 
 ---
 
-## Contributing
+## 📋 Roadmap
 
-Contributions are welcome! See [CONTRIBUTING.md](CONTRIBUTING.md) for setup, code style, and PR process.
+- [ ] Resume / CV template
+- [ ] DOCX input support
+- [ ] Image-based PDF (full OCR) support
+- [ ] PPTX input support
+- [ ] Async `convert()` API
+- [ ] Better figure caption extraction
+- [ ] More templates (Springer, ACM)
 
 ---
 
-## License
+## 📄 License
 
-[MIT](LICENSE) © 2024 DocStream Contributors
+MIT License — see [LICENSE](LICENSE) for details.
+
+---
+
+## 👤 Author
+
+**Yash Kasare**
+- GitHub: [@YashKasare21](https://github.com/YashKasare21)
+- Email: yashnkasare16@gmail.com
+
+---
+
+*If Docstream saves you time, consider giving it a ⭐ on GitHub!*

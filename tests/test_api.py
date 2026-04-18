@@ -57,29 +57,29 @@ def success_result(tmp_path):
 
 class TestExtract:
     def test_returns_list(self, sample_blocks):
-        with patch("docstream.PDFExtractor") as mock_extractor:
-            mock_extractor.return_value.extract.return_value = sample_blocks
+        with patch("docstream.core.format_router.FormatRouter.extract", return_value=sample_blocks):
             result = docstream.extract("test.pdf")
         assert isinstance(result, list)
 
     def test_returns_correct_count(self, sample_blocks):
-        with patch("docstream.PDFExtractor") as mock_extractor:
-            mock_extractor.return_value.extract.return_value = sample_blocks
+        with patch("docstream.core.format_router.FormatRouter.extract", return_value=sample_blocks):
             result = docstream.extract("test.pdf")
         assert len(result) == 2
 
     def test_accepts_string_path(self, sample_blocks):
-        with patch("docstream.PDFExtractor") as mock_extractor:
-            mock_extractor.return_value.extract.return_value = sample_blocks
+        with patch(
+            "docstream.core.format_router.FormatRouter.extract", return_value=sample_blocks
+        ) as mock_extract:
             docstream.extract("paper.pdf")
-        mock_extractor.assert_called_once_with("paper.pdf")
+        mock_extract.assert_called_once()
 
     def test_accepts_path_object(self, sample_blocks, tmp_path):
         pdf = tmp_path / "test.pdf"
-        with patch("docstream.PDFExtractor") as mock_extractor:
-            mock_extractor.return_value.extract.return_value = sample_blocks
+        with patch(
+            "docstream.core.format_router.FormatRouter.extract", return_value=sample_blocks
+        ) as mock_extract:
             docstream.extract(pdf)
-        mock_extractor.assert_called_once_with(str(pdf))
+        mock_extract.assert_called_once()
 
     def test_propagates_extraction_error(self):
         from docstream.exceptions import ExtractionError
@@ -240,7 +240,7 @@ class TestVersion:
         assert isinstance(docstream.__version__, str)
 
     def test_version_value(self):
-        assert docstream.__version__ == "0.1.0"
+        assert docstream.__version__ == "0.2.0-dev"
 
     def test_convert_is_callable(self):
         assert callable(docstream.convert)

@@ -1,0 +1,102 @@
+TEMPLATE: Academic/Technical Report (article class)
+DOCUMENT CLASS: article, 12pt, a4paper
+LAYOUT: Single-column, 1.5 line spacing
+
+PLACEHOLDER RULES:
+
+<<TITLE>>
+The document title. Plain text only.
+
+<<AUTHOR>>
+Author name(s). If multiple: Name1 \and Name2
+
+<<DATE>>
+Date if found in document.
+If not found: \today
+
+<<ABSTRACT>>
+Abstract text. One or more paragraphs.
+No commands inside.
+
+<<SECTIONS>>
+If the document has 4 or more sections, include at the very
+start of <<SECTIONS>> (before the first \section{}):
+\tableofcontents
+\newpage
+
+Otherwise omit the table of contents entirely.
+
+Each section formatted as:
+\section{Section Title}
+Section content as paragraphs.
+
+\subsection{Subsection Title}
+Content.
+
+\subsubsection{Sub-subsection Title}
+Content.
+
+For tables use booktabs format:
+\begin{table}[H]
+\centering
+\caption{Table caption}
+\begin{tabular}{lcc}
+\toprule
+Header 1 & Header 2 & Header 3 \\
+\midrule
+value & value & value \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+For equations:
+\begin{equation}
+E = mc^2
+\label{eq:einstein}
+\end{equation}
+
+TABLE HANDLING:
+When you encounter [TABLE] ... [/TABLE] in the content, convert
+the markdown table to proper LaTeX using booktabs format:
+\begin{table}[H]
+\centering
+\caption{Table Title}
+\begin{tabular}{lrr}
+\toprule
+\textbf{Column 1} & \textbf{Column 2} & \textbf{Column 3} \\
+\midrule
+value & value & value \\
+\bottomrule
+\end{tabular}
+\label{tab:1}
+\end{table}
+Rules:
+- Count columns from the markdown header row
+- Convert | col1 | col2 | to col1 & col2 \\
+- Add \caption{} using nearby text as context for the title
+- Place table near where it is referenced in the text
+
+CITATION HANDLING:
+The document uses [N] style citations like [1], [2,3], [4].
+- ALWAYS use \cite{} commands — NEVER \textsuperscript
+- [1] → \cite{ref1}
+- [2,3] → \cite{ref2,ref3}
+- [1],[2] in sequence → \cite{ref1}\cite{ref2}
+- The extracted text may also contain [?] placeholders;
+  replace each [?] with \cite{refN} sequentially
+- Match [?] occurrences to bibliography entries in order
+
+<<BIBLIOGRAPHY_BLOCK>>
+Format references as:
+\begin{thebibliography}{99}
+\bibitem{ref1}
+A.~B. Jones and J.~M. Smith,
+``Article Title,''
+\textit{Journal Title}, vol.~13, no.~52,
+pp.~123--456, Mar. 2013.
+\bibitem{ref2}
+J.~M. Smith and A.~B. Jones,
+\textit{Book Title}.
+Publisher, 7th~ed., 2012.
+\end{thebibliography}
+If no references: leave empty
