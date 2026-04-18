@@ -11,7 +11,8 @@ from pathlib import Path
 
 import pytest
 
-from docstream import DocStream, DocStreamConfig
+import docstream
+from docstream import ConversionResult
 from docstream.models.document import (
     BlockType,
     DocumentAST,
@@ -163,21 +164,17 @@ def sample_image():
 
 @pytest.fixture
 def docstream_config():
-    """Create a DocStream configuration for testing."""
-    return DocStreamConfig(
-        gemini_api_key="test_gemini_key",
-        groq_api_key="test_groq_key",
-        extraction_timeout=30,
-        structuring_timeout=60,
-        rendering_timeout=30,
-        debug=True,
-    )
+    """Stub config dict — v2 uses env vars, not a config object."""
+    return {
+        "gemini_api_key": "test_gemini_key",
+        "groq_api_key": "test_groq_key",
+    }
 
 
 @pytest.fixture
-def docstream_instance(docstream_config):
-    """Create a DocStream instance for testing."""
-    return DocStream(config=docstream_config, debug=True)
+def docstream_instance():
+    """Return the docstream module as the v2 'instance'."""
+    return docstream
 
 
 @pytest.fixture
