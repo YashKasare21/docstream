@@ -1,54 +1,50 @@
-# DocStream
+# Docstream
 
-DocStream is a professional open-source document conversion library that provides seamless bidirectional conversion between PDF and LaTeX formats. Built with modern Python and powered by AI models, DocStream offers intelligent document structure extraction, template-based rendering, and comprehensive error handling.
+> AI-powered PDF to LaTeX conversion — built for researchers and academics.
 
-## Features
+[![PyPI version](https://img.shields.io/pypi/v/docstream?color=blue)](https://pypi.org/project/docstream/)
+[![Python](https://img.shields.io/badge/python-3.11%2B-blue)](https://www.python.org/)
+[![License: MIT](https://img.shields.io/badge/license-MIT-green)](https://github.com/YashKasare21/docstream/blob/main/LICENSE)
+[![Live Demo](https://img.shields.io/badge/demo-live-brightgreen)](https://docstream-web.vercel.app)
 
-- **Bidirectional Conversion**: Convert PDF ↔ LaTeX with high fidelity
-- **AI-Powered Extraction**: Uses Gemini and Groq models for intelligent content extraction
-- **Template System**: Customizable LaTeX templates for different document types
-- **Type Safety**: Full Pydantic model validation and type hints
-- **Extensible Architecture**: Modular design for easy customization
+**Docstream** converts PDFs into publication-quality LaTeX documents using AI.
+Feed it a research paper, thesis, or report — it extracts content, structures
+it intelligently, generates clean LaTeX via a multi-provider AI chain, and
+compiles it to PDF with XeLaTeX.
 
-## Quick Start
+## Try It Now
+
+🌐 **[Live Demo →](https://docstream-web.vercel.app)**
+
+No installation required. Upload any PDF and get LaTeX back in minutes.
+
+## Quick Install
+
+```bash
+pip install docstream
+```
 
 ```python
-from docstream import DocStream
+import docstream
 
-# Initialize DocStream
-ds = DocStream()
-
-# Convert PDF to LaTeX
-result = ds.pdf_to_latex("document.pdf")
-print(result.latex_content)
-
-# Convert LaTeX to PDF
-result = ds.latex_to_pdf("document.tex")
-result.save("output.pdf")
+result = docstream.convert("paper.pdf", template="report")
+if result.success:
+    print(f"PDF: {result.pdf_path}")
 ```
 
-## Architecture
+## Why Docstream?
 
-DocStream follows a three-stage pipeline architecture:
+| Feature | Docstream | Manual | Other Tools |
+|---------|-----------|--------|-------------|
+| AI-powered | ✅ | ❌ | Partial |
+| Multi-provider fallback | ✅ | ❌ | ❌ |
+| Images extracted | ✅ | Manual | ❌ |
+| Citations handled | ✅ | Manual | Partial |
+| IEEE template | ✅ | Manual | ❌ |
+| Compiles to PDF | ✅ | Manual | ❌ |
 
-```
-Input Document → Extraction → Structuring → Rendering → Output Document
-     ↓               ↓           ↓           ↓           ↓
-   PDF/LaTeX    Raw Content  DocumentAST  LaTeX/PDF   Final Document
-```
+## Next Steps
 
-- **Extraction**: Raw content extraction from source documents
-- **Structuring**: AI-powered content organization into structured DocumentAST
-- **Rendering**: Template-based generation of target format
-
-## Documentation
-
-- [Quickstart Guide](quickstart.md)
-- [Architecture Overview](architecture.md)
-- [Template System](templates.md)
-- [API Reference](api-reference.md)
-- [Contributing Guide](contributing.md)
-
-## License
-
-DocStream is licensed under the MIT License. See [LICENSE](../LICENSE) for details.
+- [Installation Guide](getting-started/installation.md)
+- [Quick Start](getting-started/quickstart.md)
+- [API Reference](api/convert.md)

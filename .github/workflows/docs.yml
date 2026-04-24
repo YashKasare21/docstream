@@ -2,16 +2,20 @@ name: Deploy Docs
 
 on:
   push:
-    branches: [main]
+    branches: [main, v2]
+  workflow_dispatch:
 
 permissions:
   contents: write
+  pages: write
 
 jobs:
   deploy:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v5
+        with:
+          fetch-depth: 0
 
       - name: Set up Python
         uses: actions/setup-python@v6

@@ -1,73 +1,73 @@
-site_name: DocStream
-site_description: Professional document conversion library (PDF ↔ LaTeX)
-site_author: Your Name
-site_url: https://docstream.readthedocs.io
+site_name: Docstream
+site_description: AI-powered PDF to LaTeX conversion library
+site_author: Yash Kasare
+site_url: https://yashkasare21.github.io/docstream
 repo_url: https://github.com/YashKasare21/docstream
 repo_name: YashKasare21/docstream
 
 theme:
   name: material
   palette:
-    - media: "(prefers-color-scheme: light)"
-      scheme: default
-      primary: indigo
-      accent: indigo
-      toggle:
-        icon: material/brightness-7
-        name: Switch to dark mode
-    - media: "(prefers-color-scheme: dark)"
-      scheme: slate
-      primary: indigo
-      accent: indigo
+    - scheme: slate
+      primary: blue
+      accent: cyan
       toggle:
         icon: material/brightness-4
         name: Switch to light mode
-  font:
-    text: Roboto
-    code: Roboto Mono
+    - scheme: default
+      primary: blue
+      accent: cyan
+      toggle:
+        icon: material/brightness-7
+        name: Switch to dark mode
   features:
     - navigation.tabs
     - navigation.sections
-    - navigation.expand
     - navigation.top
-    - search.suggest
     - search.highlight
-    - content.tabs.link
     - content.code.copy
+    - content.code.annotate
+  icon:
+    repo: fontawesome/brands/github
 
 nav:
   - Home: index.md
-  - Quick Start: quickstart.md
-  - Architecture: architecture.md
-  - Templates: templates.md
-  - API Reference: api-reference.md
-  - Self-Hosting: self-hosting.md
-  - Contributing: contributing.md
-
-plugins:
-  - search
+  - Getting Started:
+    - Installation: getting-started/installation.md
+    - Quick Start: getting-started/quickstart.md
+    - Configuration: getting-started/configuration.md
+  - User Guide:
+    - Templates: guide/templates.md
+    - AI Providers: guide/providers.md
+  - API Reference:
+    - convert(): api/convert.md
+  - Deployment:
+    - Railway + Vercel: deployment/railway-vercel.md
 
 markdown_extensions:
   - pymdownx.highlight:
       anchor_linenums: true
   - pymdownx.inlinehilite
   - pymdownx.snippets
-  - pymdownx.superfences
-  - pymdownx.tabbed:
-      alternate_style: true
+  - pymdownx.superfences:
+      custom_fences:
+        - name: mermaid
+          class: mermaid
+          format: !!python/name:pymdownx.superfences.fence_code_format
   - admonition
   - pymdownx.details
-  - attr_list
-  - def_list
+  - pymdownx.tabbed:
+      alternate_style: true
   - tables
-  - toc:
-      permalink: true
+  - attr_list
+  - md_in_html
+
+plugins:
+  - search
 
 extra:
   social:
     - icon: fontawesome/brands/github
       link: https://github.com/YashKasare21/docstream
     - icon: fontawesome/brands/python
-      link: https://pypi.org/project/docstream/
-
-copyright: Copyright &copy; 2024 Yash Kasare
+      link: https://pypi.org/project/docstream
