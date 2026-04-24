@@ -43,6 +43,7 @@ nav:
     - convert(): api/convert.md
   - Deployment:
     - Railway + Vercel: deployment/railway-vercel.md
+  - Changelog: changelog.md
 
 markdown_extensions:
   - pymdownx.highlight:
