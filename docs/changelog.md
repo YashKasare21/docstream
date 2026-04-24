@@ -1,0 +1,83 @@
+# Changelog
+
+All notable changes to this project will be documented in this file.
+
+The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
+and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
+
+## [Unreleased]
+
+### v2.0.0-dev
+
+#### Added
+- **Multi-format extraction** — support for PDF, DOCX, PPTX, images (JPG/PNG via OCR), Markdown, and plain text input formats
+- **`FormatRouter`** — detects input file type and dispatches to the correct handler (`docstream/core/format_router.py`)
+- **Format handler suite** — six dedicated handlers: `PDFHandler`, `DOCXHandler`, `PPTXHandler`, `ImageHandler`, `MarkdownHandler`, `TextHandler` (`docstream/core/format_handlers/`)
+- **`SemanticAnalyzer`** — AI-powered document type detection (`DocumentType` enum) and semantic chunking (`docstream/core/semantic_analyzer.py`)
+- **`TemplateMatcher`** — maps `SemanticChunk` objects to template fields with compatibility scoring (`docstream/core/template_matcher.py`)
+- **`QualityChecker`** — dual-score validation: technical (compilation) + professional (layout/content) (`docstream/core/quality_checker.py`)
+- **`AIProviderChain`** — unified AI interface with automatic fallback: Gemini 1.5 Flash → Groq Llama 3.1 70B → Ollama (`docstream/core/ai_provider.py`)
+- **New dependencies** — `python-docx`, `python-pptx`, `mistune`, `ollama`, `Pillow`
+
+---
+
+## [0.1.0] - 2024-03-07
+
+### Added
+
+#### Core Pipeline
+- Three-stage PDF → LaTeX + PDF pipeline: **Extraction → Structuring → Rendering**
+- `PDFExtractor` using PyMuPDF for high-fidelity text extraction with font metadata (size, bold, italic), bounding boxes, and page numbers
+- Scanned PDF fallback: automatic Tesseract OCR when extracted text is below 100 characters per page
+- Table detection via PyMuPDF `find_tables()` with Markdown serialisation
+- `DocumentStructurer` using **Gemini 1.5 Flash** (primary) with **Groq Llama-3** fallback and exponential-backoff retry (2 attempts per provider)
+- `DocumentRenderer` using **Pandoc** JSON pipeline + **XeLaTeX** two-pass compilation for cross-references
+- LaTeX log parsing for actionable error messages on compilation failure
+
+#### Templates
+- `report.lua` — Academic report (article class, 1-inch margins, lmodern serif)
+- `ieee.lua` — IEEE two-column conference format (IEEEtran class)
+- `resume.lua` — Clean résumé (compact margins, no section numbers)
+
+#### Public API (Phase 4)
+- `docstream.extract(path)` → `list[Block]`
+- `docstream.structure(blocks, gemini_key, groq_key)` → `DocumentAST`
+- `docstream.render(ast, template, output_dir)` → `ConversionResult`
+- `docstream.convert(path, template, output_dir)` → `ConversionResult` (full pipeline in one call)
+- Automatic API key loading from `.env` via `python-dotenv`
+- Accept `str` or `Path` for all file path arguments
+
+#### CLI
+- `docstream convert <pdf> --template <name> --output <dir>`
+- `docstream extract <pdf> --output <json>`
+- `docstream templates list`
+- `docstream --version`
+- Threading-based progress spinner on stderr
+- Exit code 0 on success, 1 on error
+
+#### Data Models (Pydantic v2)
+- `DocumentAST`, `DocumentMetadata`, `Section`, `Block`, `Table`, `Image`
+- `ConversionResult` with `tex_path`, `pdf_path`, `template_used`, `processing_time_seconds`, `error`
+- `BlockType`, `ListType` enums
+
+#### Exceptions
+- Full hierarchy: `DocstreamError` → `ExtractionError`, `StructuringError`, `RenderingError`, `ValidationError`, `APIError`, `TemplateError`, `CompilationError`, `FileError`, `TimeoutError`, `ModelError`
+
+#### Docker
+- `docker/Dockerfile.dev` — development image with all system tools
+- `docker/Dockerfile.prod` — multi-stage production image, non-root user
+- `docker-compose.yml` — api, worker, redis:7, postgres:16 with healthchecks
+- `.dockerignore` — excludes `.git`, `.venv`, `__pycache__`, `tests/`, `docs/`
+- `make docker-build`, `make docker-run`, `make docker-test`
+
+#### Developer Experience
+- `Makefile` with `install`, `test`, `lint`, `format`, `typecheck`, `check`, `docs`, `clean`, `docker-*` targets
+- GitHub Actions CI (pytest + ruff + mypy on push/PR to `main` and `dev`)
+- GitHub Actions PyPI publish workflow (triggered by release tag)
+- 118 pytest tests across 5 test files
+- MkDocs Material documentation site
+
+---
+
+[Unreleased]: https://github.com/YashKasare21/docstream/compare/v0.1.0...HEAD
+[0.1.0]: https://github.com/YashKasare21/docstream/releases/tag/v0.1.0
