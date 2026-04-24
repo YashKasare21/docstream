@@ -1,31 +1,59 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">
     <url>
-         <loc>https://docstream.readthedocs.io/</loc>
-         <lastmod>2026-04-18</lastmod>
+         <loc>https://yashkasare21.github.io/docstream/</loc>
+         <lastmod>2026-04-24</lastmod>
     </url>
     <url>
-         <loc>https://docstream.readthedocs.io/api-reference/</loc>
-         <lastmod>2026-04-18</lastmod>
+         <loc>https://yashkasare21.github.io/docstream/api-reference/</loc>
+         <lastmod>2026-04-24</lastmod>
     </url>
     <url>
-         <loc>https://docstream.readthedocs.io/architecture/</loc>
-         <lastmod>2026-04-18</lastmod>
+         <loc>https://yashkasare21.github.io/docstream/architecture/</loc>
+         <lastmod>2026-04-24</lastmod>
     </url>
     <url>
-         <loc>https://docstream.readthedocs.io/contributing/</loc>
-         <lastmod>2026-04-18</lastmod>
+         <loc>https://yashkasare21.github.io/docstream/contributing/</loc>
+         <lastmod>2026-04-24</lastmod>
     </url>
     <url>
-         <loc>https://docstream.readthedocs.io/quickstart/</loc>
-         <lastmod>2026-04-18</lastmod>
+         <loc>https://yashkasare21.github.io/docstream/quickstart/</loc>
+         <lastmod>2026-04-24</lastmod>
     </url>
     <url>
-         <loc>https://docstream.readthedocs.io/self-hosting/</loc>
-         <lastmod>2026-04-18</lastmod>
+         <loc>https://yashkasare21.github.io/docstream/self-hosting/</loc>
+         <lastmod>2026-04-24</lastmod>
     </url>
     <url>
-         <loc>https://docstream.readthedocs.io/templates/</loc>
-         <lastmod>2026-04-18</lastmod>
+         <loc>https://yashkasare21.github.io/docstream/templates/</loc>
+         <lastmod>2026-04-24</lastmod>
+    </url>
+    <url>
+         <loc>https://yashkasare21.github.io/docstream/api/convert/</loc>
+         <lastmod>2026-04-24</lastmod>
+    </url>
+    <url>
+         <loc>https://yashkasare21.github.io/docstream/deployment/railway-vercel/</loc>
+         <lastmod>2026-04-24</lastmod>
+    </url>
+    <url>
+         <loc>https://yashkasare21.github.io/docstream/getting-started/configuration/</loc>
+         <lastmod>2026-04-24</lastmod>
+    </url>
+    <url>
+         <loc>https://yashkasare21.github.io/docstream/getting-started/installation/</loc>
+         <lastmod>2026-04-24</lastmod>
+    </url>
+    <url>
+         <loc>https://yashkasare21.github.io/docstream/getting-started/quickstart/</loc>
+         <lastmod>2026-04-24</lastmod>
+    </url>
+    <url>
+         <loc>https://yashkasare21.github.io/docstream/guide/providers/</loc>
+         <lastmod>2026-04-24</lastmod>
+    </url>
+    <url>
+         <loc>https://yashkasare21.github.io/docstream/guide/templates/</loc>
+         <lastmod>2026-04-24</lastmod>
     </url>
 </urlset>
